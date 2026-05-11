@@ -10,6 +10,10 @@ from services.model_service import ModelService
 from services import hardware_service
 from ui.main_window import MainWindow
 
+# Follow me on Twitch pls :D https://www.twitch.tv/syluse
+# And on twitter https://twitter.com/syluse_
+# It's ok if you don't want to, not like I'm pouting or anything hmp b-baka! >_>
+
 def main():
     # 1. Setup Logging
     try:
