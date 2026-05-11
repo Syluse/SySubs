@@ -13,7 +13,6 @@
 - [ ] **PyInstaller spec** — create `.spec` file with icon, hidden imports, ffmpeg bundling
 - [ ] **Build script** — automate PyInstaller build + zip packaging
 - [ ] **GitHub Releases** — set up release workflow for portable `.zip` distribution
-- [ ] **Clean VM test checklist** — verify CPU-only fallback on machine with no CUDA
 
 ## Future Features (v2+)
 - [ ] Batch file processing — queue multiple files, shared or per-file settings
