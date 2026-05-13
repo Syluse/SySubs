@@ -5,6 +5,9 @@ SUPPORTED_VIDEO_FORMATS = [".mp4", ".mov", ".avi", ".mkv", ".webm", ".flv"]
 SUPPORTED_AUDIO_FORMATS = [".mp3", ".wav", ".aac", ".flac", ".m4a", ".ogg"]
 SUPPORTED_FORMATS = SUPPORTED_VIDEO_FORMATS + SUPPORTED_AUDIO_FORMATS
 
+APP_VERSION = "1.0.0"
+GITHUB_URL = "https://github.com/syluse/SySubs"
+
 MODEL_REGISTRY = {
     "tiny":     {"size_mb": 75,   "vram_gb": 1,  "ram_gb": 1,  "tier": "Fast: good for most computers"},
     "base":     {"size_mb": 145,  "vram_gb": 1,  "ram_gb": 1,  "tier": "Fast: good for most computers"},
@@ -32,6 +35,10 @@ DEFAULT_CONFIG = {
     "last_export_folder": None,
     "text_transform": "none",
     "strip_punctuation": False,
+    "window_width": 950,
+    "window_height": 700,
+    "window_x": None,
+    "window_y": None,
 }
 
 # AppData path resolution

@@ -2,10 +2,12 @@ import customtkinter as ctk
 import os
 import queue
 import threading
+import webbrowser
+import tkinter as tk
 from tkinter import filedialog, messagebox
 from pathlib import Path
 
-from constants import SUPPORTED_FORMATS, PRESETS
+from constants import SUPPORTED_FORMATS, PRESETS, GITHUB_URL
 from services.transcription import TranscriptionWorker
 from services.subtitle_formatter import format_srt
 from ui.model_manager import ModelManagerWindow
@@ -19,13 +21,32 @@ class MainWindow(ctk.CTk):
         self.log_queue = log_queue
         
         self.title("SySubs")
-        self.geometry("700x800")
+
+        # Window geometry from config
+        w = self.config.get("window_width", 950)
+        h = self.config.get("window_height", 700)
+        x = self.config.get("window_x")
+        y = self.config.get("window_y")
+        if x is not None and y is not None:
+            self.geometry(f"{w}x{h}+{x}+{y}")
+        else:
+            self.geometry(f"{w}x{h}")
+
         self.after(200, lambda: self.iconbitmap("assets/icon.ico"))
-        
-        # Grid config
-        self.grid_columnconfigure(0, weight=1)
-        self.grid_rowconfigure(5, weight=1) # Log panel expands
-        
+
+        # Grid config — landscape layout
+        self.grid_columnconfigure(0, weight=2)  # left panel
+        self.grid_columnconfigure(1, weight=1)  # right panel (log)
+        self.grid_rowconfigure(0, weight=0)     # header
+        self.grid_rowconfigure(1, weight=1)     # content row
+
+        self.minsize(850, 500)
+
+        self._save_geom_timer = None
+        self.bind("<Configure>", self._on_window_configure)
+        self.protocol("WM_DELETE_WINDOW", self._on_close)
+
+        self._setup_menu()
         self._setup_ui()
         self._load_config_to_ui()
         
@@ -35,22 +56,31 @@ class MainWindow(ctk.CTk):
         self.is_transcribing = False
 
     def _setup_ui(self):
-        # Configure layout font
         self.header_font = ctk.CTkFont(size=24, weight="bold")
         self.section_font = ctk.CTkFont(size=14, weight="bold")
         self.label_font = ctk.CTkFont(size=12)
-        
-        # 0. Header
-        self.header_label = ctk.CTkLabel(self, text="SySubs", font=self.header_font, text_color="#CAF0F8")
-        self.header_label.grid(row=0, column=0, padx=30, pady=(30, 20), sticky="w")
 
-        # 1. File Section
-        self.file_frame = ctk.CTkFrame(self)
-        self.file_frame.grid(row=1, column=0, padx=30, pady=(0, 20), sticky="ew")
+        # 0. Header (spans both columns)
+        self.header_label = ctk.CTkLabel(self, text="SySubs", font=self.header_font, text_color="#CAF0F8")
+        self.header_label.grid(row=0, column=0, columnspan=2, padx=30, pady=(30, 20), sticky="w")
+
+        # 1. Left Panel
+        self.left_panel = ctk.CTkFrame(self, fg_color="transparent")
+        self.left_panel.grid(row=1, column=0, sticky="nsew", padx=(30, 15), pady=(0, 30))
+        self.left_panel.grid_columnconfigure(0, weight=1)
+        self.left_panel.grid_rowconfigure(0, weight=1)
+
+        self.left_scroll = ctk.CTkScrollableFrame(self.left_panel)
+        self.left_scroll.grid(row=0, column=0, sticky="nsew")
+        self.left_scroll.grid_columnconfigure(0, weight=1)
+
+        # -- File Section
+        self.file_frame = ctk.CTkFrame(self.left_scroll)
+        self.file_frame.grid(row=0, column=0, sticky="ew")
         self.file_frame.grid_columnconfigure(0, weight=1)
-        
+
         ctk.CTkLabel(self.file_frame, text="INPUT FILE", font=self.section_font).grid(row=0, column=0, padx=15, pady=(15, 5), sticky="w")
-        
+
         self.inner_file_frame = ctk.CTkFrame(self.file_frame, fg_color="transparent")
         self.inner_file_frame.grid(row=1, column=0, padx=15, pady=(0, 15), sticky="ew")
         self.inner_file_frame.grid_columnconfigure(0, weight=1)
@@ -58,116 +88,111 @@ class MainWindow(ctk.CTk):
         self.file_path_var = ctk.StringVar(value="No file selected")
         self.file_entry = ctk.CTkEntry(self.inner_file_frame, textvariable=self.file_path_var, state="readonly", height=35)
         self.file_entry.grid(row=0, column=0, padx=(0, 10), sticky="ew")
-        
+
         self.browse_btn = ctk.CTkButton(self.inner_file_frame, text="Browse", width=100, height=35, command=self._on_browse)
         self.browse_btn.grid(row=0, column=1)
-        
-        # 2. Configuration Section
-        self.config_frame = ctk.CTkFrame(self)
-        self.config_frame.grid(row=2, column=0, padx=30, pady=(0, 20), sticky="ew")
-        self.config_frame.grid_columnconfigure((0, 1, 2, 3), weight=1)
-        
-        ctk.CTkLabel(self.config_frame, text="TRANSCRIPTION SETTINGS", font=self.section_font).grid(row=0, column=0, columnspan=4, padx=15, pady=(15, 5), sticky="w")
 
-        # Model
+        # -- Config Section (2-column layout inside)
+        self.config_frame = ctk.CTkFrame(self.left_scroll)
+        self.config_frame.grid(row=1, column=0, pady=(20, 0), sticky="ew")
+        self.config_frame.grid_columnconfigure((0, 1), weight=1)
+
+        ctk.CTkLabel(self.config_frame, text="TRANSCRIPTION SETTINGS", font=self.section_font).grid(row=0, column=0, columnspan=2, padx=15, pady=(15, 5), sticky="w")
+
+        # Model (row 1, col 0)
         ctk.CTkLabel(self.config_frame, text="Model", font=self.label_font).grid(row=1, column=0, padx=15, sticky="w")
         self.model_var = ctk.StringVar()
         self.model_dropdown = ctk.CTkOptionMenu(self.config_frame, variable=self.model_var, command=self._on_model_select, height=35)
         self.model_dropdown.grid(row=2, column=0, padx=15, pady=(0, 15), sticky="ew")
         self._refresh_models()
-        
-        # Language
+
+        # Language (row 1, col 1)
         ctk.CTkLabel(self.config_frame, text="Language", font=self.label_font).grid(row=1, column=1, padx=15, sticky="w")
         self.lang_var = ctk.StringVar(value="Auto-detect")
         self.lang_options = {
-            "Auto-detect": None, "English": "en", "Filipino": "fil", "Japanese": "ja", 
-            "Spanish": "es", "French": "fr", "German": "de", "Korean": "ko", 
+            "Auto-detect": None, "English": "en", "Filipino": "fil", "Japanese": "ja",
+            "Spanish": "es", "French": "fr", "German": "de", "Korean": "ko",
             "Chinese": "zh", "Portuguese": "pt", "Italian": "it"
         }
         self.lang_dropdown = ctk.CTkOptionMenu(self.config_frame, values=list(self.lang_options.keys()), variable=self.lang_var, height=35)
         self.lang_dropdown.grid(row=2, column=1, padx=15, pady=(0, 15), sticky="ew")
-        
-        # Hardware
-        ctk.CTkLabel(self.config_frame, text="Device", font=self.label_font).grid(row=1, column=2, padx=15, sticky="w")
+
+        # Device (row 3, col 0)
+        ctk.CTkLabel(self.config_frame, text="Device", font=self.label_font).grid(row=3, column=0, padx=15, sticky="w")
         self.device_var = ctk.StringVar(value="Auto")
         self.device_dropdown = ctk.CTkOptionMenu(
-            self.config_frame, 
-            values=["Auto", "CPU", "CUDA"], 
+            self.config_frame,
+            values=["Auto", "CPU", "CUDA"],
             variable=self.device_var,
             command=lambda v: self.config.set("device", v.lower()),
             height=35
         )
-        self.device_dropdown.grid(row=2, column=2, padx=15, pady=(0, 15), sticky="ew")
+        self.device_dropdown.grid(row=4, column=0, padx=15, pady=(0, 15), sticky="ew")
 
-        # Preset
-        ctk.CTkLabel(self.config_frame, text="Preset", font=self.label_font).grid(row=1, column=3, padx=15, sticky="w")
+        # Preset (row 3, col 1)
+        ctk.CTkLabel(self.config_frame, text="Preset", font=self.label_font).grid(row=3, column=1, padx=15, sticky="w")
         self.preset_var = ctk.StringVar(value="Short-form / Reels")
         self.preset_options = {
-            "Short-form / Reels": "short-form", 
-            "Landscape / YouTube": "landscape", 
+            "Short-form / Reels": "short-form",
+            "Landscape / YouTube": "landscape",
             "Custom": "custom"
         }
         self.preset_dropdown = ctk.CTkOptionMenu(
-            self.config_frame, 
-            values=list(self.preset_options.keys()), 
+            self.config_frame,
+            values=list(self.preset_options.keys()),
             variable=self.preset_var,
             command=self._on_preset_change,
             height=35
         )
-        self.preset_dropdown.grid(row=2, column=3, padx=15, pady=(0, 15), sticky="ew")
+        self.preset_dropdown.grid(row=4, column=1, padx=15, pady=(0, 15), sticky="ew")
 
-        # 3. Custom Settings Row (Embedded in config frame)
+        # Custom Settings (row 5, spans both columnspans)
         self.custom_frame = ctk.CTkFrame(self.config_frame, fg_color=["#F8FAFC", "#0F172A"], border_width=1)
-        self.custom_frame.grid(row=3, column=0, columnspan=4, padx=15, pady=(0, 15), sticky="ew")
+        self.custom_frame.grid(row=5, column=0, columnspan=2, padx=15, pady=(0, 15), sticky="ew")
         self.custom_frame.grid_columnconfigure((0, 1, 2), weight=1)
-        
-        # Custom Mode
+
         ctk.CTkLabel(self.custom_frame, text="Custom Mode", font=self.label_font).grid(row=0, column=0, padx=10, pady=(10, 0), sticky="w")
         self.custom_mode_var = ctk.StringVar(value="Words")
         self.custom_mode_dropdown = ctk.CTkOptionMenu(
-            self.custom_frame, 
-            values=["Words", "Characters"], 
+            self.custom_frame,
+            values=["Words", "Characters"],
             variable=self.custom_mode_var,
             command=lambda v: self.config.set("custom_mode", v.lower()),
             height=30
         )
         self.custom_mode_dropdown.grid(row=1, column=0, padx=10, pady=(0, 10), sticky="ew")
 
-        # Custom Value
         ctk.CTkLabel(self.custom_frame, text="Max Words/Chars", font=self.label_font).grid(row=0, column=1, padx=10, pady=(10, 0), sticky="w")
         self.custom_value_var = ctk.StringVar(value="2")
         self.custom_value_entry = ctk.CTkEntry(self.custom_frame, textvariable=self.custom_value_var, height=30)
         self.custom_value_entry.grid(row=1, column=1, padx=10, pady=(0, 10), sticky="ew")
         self.custom_value_var.trace_add("write", self._on_custom_value_write)
 
-        # Custom Lines
         ctk.CTkLabel(self.custom_frame, text="Max Lines", font=self.label_font).grid(row=0, column=2, padx=10, pady=(10, 0), sticky="w")
         self.custom_lines_var = ctk.StringVar(value="1")
         self.custom_lines_dropdown = ctk.CTkOptionMenu(
-            self.custom_frame, 
-            values=["1", "2"], 
+            self.custom_frame,
+            values=["1", "2"],
             variable=self.custom_lines_var,
             command=lambda v: self.config.set("custom_max_lines", int(v)),
             height=30
         )
         self.custom_lines_dropdown.grid(row=1, column=2, padx=10, pady=(0, 10), sticky="ew")
 
-        # Custom Max Gap (row 2, full width)
         ctk.CTkLabel(self.custom_frame, text="Max Gap (seconds)", font=self.label_font).grid(row=2, column=0, padx=10, pady=(5, 0), sticky="w")
         self.custom_max_gap_var = ctk.StringVar(value="0.05")
         self.custom_max_gap_entry = ctk.CTkEntry(self.custom_frame, textvariable=self.custom_max_gap_var, height=30)
         self.custom_max_gap_entry.grid(row=3, column=0, padx=10, pady=(0, 10), sticky="ew")
         self.custom_max_gap_var.trace_add("write", self._on_custom_max_gap_write)
-        self.custom_frame.grid_remove() # Hidden by default
+        self.custom_frame.grid_remove()
 
-        # 3b. Text Formatting Row (Embedded in config frame)
+        # Text Formatting (row 6, spans both columnspans)
         self.format_frame = ctk.CTkFrame(self.config_frame, fg_color="transparent", border_width=0)
-        self.format_frame.grid(row=4, column=0, columnspan=4, padx=15, pady=(0, 15), sticky="ew")
+        self.format_frame.grid(row=6, column=0, columnspan=2, padx=15, pady=(0, 15), sticky="ew")
         self.format_frame.grid_columnconfigure((0, 1), weight=1)
 
         ctk.CTkLabel(self.format_frame, text="TEXT FORMATTING", font=self.section_font).grid(row=0, column=0, columnspan=2, sticky="w")
 
-        # Transform
         ctk.CTkLabel(self.format_frame, text="Transform", font=self.label_font).grid(row=1, column=0, padx=(0, 5), sticky="w")
         self.transform_var = ctk.StringVar(value="None")
         self.transform_dropdown = ctk.CTkOptionMenu(
@@ -179,7 +204,6 @@ class MainWindow(ctk.CTk):
         )
         self.transform_dropdown.grid(row=2, column=0, padx=(0, 5), pady=(0, 5), sticky="ew")
 
-        # Strip punctuation
         ctk.CTkLabel(self.format_frame, text="Remove Punctuations", font=self.label_font).grid(row=1, column=1, padx=(5, 0), sticky="w")
         self.strip_punct_var = ctk.BooleanVar(value=False)
         self.strip_punct_switch = ctk.CTkSwitch(
@@ -192,43 +216,44 @@ class MainWindow(ctk.CTk):
         )
         self.strip_punct_switch.grid(row=2, column=1, padx=(5, 0), pady=(0, 5), sticky="w")
 
-        # 4. Progress Section
+        # -- Action Button
         self.action_btn = ctk.CTkButton(
-            self, 
-            text="Transcribe Now", 
-            font=ctk.CTkFont(size=18, weight="bold"), 
-            height=50, 
+            self.left_scroll,
+            text="Transcribe Now",
+            font=ctk.CTkFont(size=18, weight="bold"),
+            height=50,
             command=self._on_action_click,
             corner_radius=12
         )
-        self.action_btn.grid(row=3, column=0, padx=30, pady=(10, 20), sticky="ew")
-        
-        self.progress_bar = ctk.CTkProgressBar(self, height=12)
-        self.progress_bar.grid(row=4, column=0, padx=30, pady=(0, 20), sticky="ew")
+        self.action_btn.grid(row=2, column=0, pady=(20, 10), sticky="ew")
+
+        # -- Progress Bar
+        self.progress_bar = ctk.CTkProgressBar(self.left_scroll, height=12)
+        self.progress_bar.grid(row=3, column=0, pady=(0, 10), sticky="ew")
         self.progress_bar.set(0)
-        self.progress_bar.grid_remove() 
-        
-        # 5. Log Section
+        self.progress_bar.grid_remove()
+
+        # -- Bottom Actions
+        self.bottom_frame = ctk.CTkFrame(self.left_scroll, fg_color="transparent")
+        self.bottom_frame.grid(row=4, column=0, sticky="ew")
+        self.bottom_frame.grid_columnconfigure(1, weight=1)
+
+        self.reset_btn = ctk.CTkButton(self.bottom_frame, text="Reset to Defaults", width=120, fg_color="transparent", border_width=1, command=self._on_reset)
+        self.reset_btn.grid(row=0, column=0, padx=(0, 10))
+
+        self.mgr_btn = ctk.CTkButton(self.bottom_frame, text="Model Manager", width=140, fg_color="#2563EB", hover_color="#1D4ED8", command=self._on_open_manager)
+        self.mgr_btn.grid(row=0, column=1, sticky="e")
+
+        # 2. Right Panel (Activity Log)
         self.log_frame = ctk.CTkFrame(self)
-        self.log_frame.grid(row=5, column=0, padx=30, pady=(0, 20), sticky="nsew")
+        self.log_frame.grid(row=1, column=1, sticky="nsew", padx=(15, 30), pady=(0, 30))
         self.log_frame.grid_columnconfigure(0, weight=1)
         self.log_frame.grid_rowconfigure(1, weight=1)
 
         ctk.CTkLabel(self.log_frame, text="ACTIVITY LOG", font=self.section_font).grid(row=0, column=0, padx=15, pady=(15, 5), sticky="w")
-        
+
         self.log_panel = ctk.CTkTextbox(self.log_frame, font=ctk.CTkFont(family="Consolas", size=11), state="disabled", border_width=0, fg_color="transparent")
         self.log_panel.grid(row=1, column=0, padx=5, pady=(0, 10), sticky="nsew")
-        
-        # 6. Bottom Actions
-        self.bottom_frame = ctk.CTkFrame(self, fg_color="transparent")
-        self.bottom_frame.grid(row=6, column=0, padx=30, pady=(0, 30), sticky="ew")
-        self.bottom_frame.grid_columnconfigure(1, weight=1)
-        
-        self.reset_btn = ctk.CTkButton(self.bottom_frame, text="Reset to Defaults", width=120, fg_color="transparent", border_width=1, command=self._on_reset)
-        self.reset_btn.grid(row=0, column=0, padx=(0, 10))
-        
-        self.mgr_btn = ctk.CTkButton(self.bottom_frame, text="Model Manager", width=140, fg_color="#2563EB", hover_color="#1D4ED8", command=self._on_open_manager)
-        self.mgr_btn.grid(row=0, column=1, sticky="e")
 
     def _load_config_to_ui(self):
         # Lang
@@ -490,3 +515,60 @@ class MainWindow(ctk.CTk):
 
     def _on_open_manager(self):
         ModelManagerWindow(self, self.model_service, self.config, on_change_callback=self._refresh_models)
+
+    def _setup_menu(self):
+        menu_bg = "#1E293B"
+        menu_fg = "#F8FAFC"
+        menu_active_bg = "#334155"
+        menu_active_fg = "#CAF0F8"
+
+        menubar = tk.Menu(self, bg=menu_bg, fg=menu_fg, activebackground=menu_active_bg, activeforeground=menu_active_fg, font=("Segoe UI", 10), borderwidth=0, relief="flat")
+        self.configure(menu=menubar)
+
+        file_menu = tk.Menu(menubar, tearoff=False, bg=menu_bg, fg=menu_fg, activebackground=menu_active_bg, activeforeground=menu_active_fg, font=("Segoe UI", 10), borderwidth=0)
+        menubar.add_cascade(label="File", menu=file_menu)
+        file_menu.add_command(label="Open File...", command=self._on_browse, accelerator="Ctrl+O")
+        file_menu.add_separator()
+        file_menu.add_command(label="Exit", command=self._on_menu_exit)
+
+        help_menu = tk.Menu(menubar, tearoff=False, bg=menu_bg, fg=menu_fg, activebackground=menu_active_bg, activeforeground=menu_active_fg, font=("Segoe UI", 10), borderwidth=0)
+        menubar.add_cascade(label="Help", menu=help_menu)
+        help_menu.add_command(label="Model Manager", command=self._on_open_manager, accelerator="Ctrl+Shift+M")
+        help_menu.add_separator()
+        help_menu.add_command(label="Report a Bug", command=lambda: webbrowser.open(GITHUB_URL + "/issues/new"))
+        help_menu.add_command(label="Send Feedback", command=lambda: webbrowser.open(GITHUB_URL + "/discussions"))
+        help_menu.add_separator()
+        help_menu.add_command(label="About SySubs", command=self._on_about)
+
+        self.bind("<Control-o>", lambda e: self._on_browse())
+        self.bind("<Control-O>", lambda e: self._on_browse())
+        self.bind("<Control-Shift-M>", lambda e: self._on_open_manager())
+        self.bind("<Control-Shift-m>", lambda e: self._on_open_manager())
+
+    def _on_menu_exit(self):
+        self._on_close()
+
+    def _on_about(self):
+        from ui.about_dialog import AboutDialog
+        AboutDialog(self)
+
+    def _on_close(self):
+        if self.is_transcribing:
+            if not messagebox.askyesno("Quit?", "Transcription is in progress. Are you sure you want to quit?"):
+                return
+            self.stop_event.set()
+        self._save_window_geometry()
+        self.destroy()
+
+    def _on_window_configure(self, event):
+        if event.widget is not self:
+            return
+        if self._save_geom_timer:
+            self.after_cancel(self._save_geom_timer)
+        self._save_geom_timer = self.after(500, self._save_window_geometry)
+
+    def _save_window_geometry(self):
+        self.config.set("window_width", self.winfo_width())
+        self.config.set("window_height", self.winfo_height())
+        self.config.set("window_x", self.winfo_x())
+        self.config.set("window_y", self.winfo_y())
