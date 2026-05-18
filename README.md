@@ -1,7 +1,9 @@
-# SySubs
+# ![SySubs Icon](/assets/icon.ico) SySubs 
 
 Speech-to-text subtitle generator originally made for me to use in editing, and to learn in building apps. 
-SySubs transcribes audio from video and audio files into a `.srt` subtitle using local speech-to-text models.
+SySubs transcribes audio from video and audio files into a `.srt` subtitle using local whisper speech-to-text models.
+
+Created by [Syluse](https://github.com/syluse) / [@Syluse_](https://x.com/Syluse_)
 
 ## Features
 
@@ -25,15 +27,16 @@ SySubs transcribes audio from video and audio files into a `.srt` subtitle using
 
 1. Download the latest release from [Releases](https://github.com/syluse/SySubs/releases)
 2. Extract the zip anywhere
-3. Run `SySubs.exe`
-4. Select a video or audio file, pick a model, click **Transcribe Now**
+3. Run `SySubs.vbs`
+4. Select a video or audio file, pick a model, select a preset/custom, then click **Transcribe**
 
-Models download automatically on first use.
+Tiny model comes prebundled in the .zip file
+
+## Reporting Bugs/Issues/Suggestions
+Report Bugs/Issues or send your suggestions [Here](https://github.com/syluse/SySubs/issues/new)
 
 ## About the AI
 
 SySubs uses **speech-to-text models** (OpenAI Whisper via faster-whisper), not generative AI. It does not create, rewrite, or generate new content, it only transcribes what was already spoken in your media files.
 
 **No data is collected.** Everything runs locally on your machine. Your files, audio, and transcriptions never leave your computer. The only network requests made are for downloading models (which you explicitly choose to install).
-
-Created by [Syluse](https://github.com/syluse) / [@Syluse_](https://x.com/Syluse_)
