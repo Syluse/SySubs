@@ -21,9 +21,9 @@ jobs:
           python-version: '3.11'
           cache: 'pip'
 
-      - name: Install dependencies
+      - name: Install dependencies (for model download)
         run: |
-          pip install faster-whisper customtkinter pyinstaller
+          pip install faster-whisper
 
       - name: Download ffmpeg
         run: |
@@ -46,20 +46,10 @@ jobs:
           print('tiny model downloaded')
           "
 
-      - name: Build with PyInstaller
+      - name: Build portable distribution
         run: |
-          pyinstaller SySubs.spec --clean --noconfirm
-          Write-Host "PyInstaller build complete"
-
-      - name: Create portable zip
-        run: |
-          New-Item -ItemType Directory -Path "Releases" -Force | Out-Null
-          Add-Type -AssemblyName System.IO.Compression.Filesystem
-          $version = $env:GITHUB_REF_NAME -replace '^v', ''
-          [System.IO.Compression.ZipFile]::CreateFromDirectory(
-            'dist\SySubs',
-            "Releases\SySubs-$version-portable.zip"
-          )
+          .\scripts\package.ps1 -Version "$($env:GITHUB_REF_NAME -replace '^v', '')"
+          Write-Host "Portable build complete"
 
       - name: Create Release
         uses: softprops/action-gh-release@v2
