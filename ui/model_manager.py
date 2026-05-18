@@ -16,29 +16,26 @@ class ModelManagerWindow(ctk.CTkToplevel):
         self.title("Model Manager")
         self.geometry("600x500")
         
-        # Modal-ish behavior
         self.grab_set()
+        self.after(200, lambda: self.iconbitmap("assets/icon.ico"))
         
         self.grid_columnconfigure(0, weight=1)
         self.grid_rowconfigure(1, weight=1)
         
-        # Header
         self.header = ctk.CTkLabel(self, text="Available Whisper Models", font=ctk.CTkFont(size=18, weight="bold"))
         self.header.grid(row=0, column=0, padx=20, pady=20, sticky="w")
         
-        # Scrollable list container
         self.scrollable_frame = ctk.CTkScrollableFrame(self)
         self.scrollable_frame.grid(row=1, column=0, padx=20, pady=(0, 20), sticky="nsew")
         self.scrollable_frame.grid_columnconfigure(0, weight=1)
         
-        self.rows = {} # model_name -> widgets dict
-        self.download_queues = {} # model_name -> queue
+        self.rows = {}
+        self.download_queues = {}
         
         self._render_models()
         self._poll_downloads()
 
     def _render_models(self):
-        # Clear existing
         for widget in self.scrollable_frame.winfo_children():
             widget.destroy()
             
@@ -50,12 +47,10 @@ class ModelManagerWindow(ctk.CTkToplevel):
             frame.grid(row=i, column=0, padx=5, pady=5, sticky="ew")
             frame.grid_columnconfigure(0, weight=1)
             
-            # Left: Info
             info_text = f"{m['name'].upper()}: {m['size_mb']}MB\n{m['tier']}"
             info_label = ctk.CTkLabel(frame, text=info_text, justify="left", font=ctk.CTkFont(size=12))
             info_label.grid(row=0, column=0, padx=10, pady=10, sticky="w")
             
-            # Right: Status & Actions
             status_frame = ctk.CTkFrame(frame, fg_color="transparent")
             status_frame.grid(row=0, column=1, padx=10, pady=10)
             
@@ -101,14 +96,12 @@ class ModelManagerWindow(ctk.CTkToplevel):
         row = self.rows[model_name]
         row["dl_btn"].configure(state="disabled", text="Queued...")
         row["status_label"].configure(text="Downloading...", text_color="orange")
-        
+
         q = queue.Queue()
         self.download_queues[model_name] = q
         
         def run_dl():
             try:
-                # model_service.download currently doesn't support progress_cb for faster-whisper easily,
-                # but we'll call it for when we add it.
                 self.model_service.download(model_name)
                 q.put({"type": "success"})
             except Exception as e:
@@ -124,14 +117,16 @@ class ModelManagerWindow(ctk.CTkToplevel):
                 self.on_change_callback()
         except SySubsError as e:
             logger.error(f"Delete failed: {e}")
-            # Could show a messagebox here
 
     def _poll_downloads(self):
+        active_names = set()
+
         for name, q in list(self.download_queues.items()):
+            active_names.add(name)
             try:
                 msg = q.get_nowait()
                 if msg["type"] == "success":
-                    logger.info(f"Download thread finished for {name}")
+                    logger.info(f"Download finished for {name}")
                     del self.download_queues[name]
                     self._render_models()
                     if self.on_change_callback:
@@ -140,9 +135,8 @@ class ModelManagerWindow(ctk.CTkToplevel):
                     logger.error(f"Download failed for {name}: {msg['message']}")
                     del self.download_queues[name]
                     self._render_models()
-                    # Show error on row
                     self.rows[name]["status_label"].configure(text=f"Error: {msg['message'][:20]}...", text_color="red")
             except queue.Empty:
                 pass
-        
-        self.after(500, self._poll_downloads)
+
+        self.after(250, self._poll_downloads)
