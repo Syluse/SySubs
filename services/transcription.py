@@ -25,42 +25,50 @@ class TranscriptionService:
             raise SySubsError("faster-whisper is not installed.")
 
         # 1. Probe duration
+        logger.info("Probing audio file duration...")
         total_seconds = probe_duration(file_path)
+        logger.info(f"Duration: {total_seconds}s")
         
         # 2. Extract audio
+        logger.info("Extracting audio to 16kHz mono WAV...")
         tmp_wav_path = extract(file_path)
+        logger.info(f"Audio extracted to: {tmp_wav_path}")
         
         try:
             # 3. Load model
+            model_dir = str(models_path / model_name)
+            logger.info(f"Model directory: {model_dir}")
             try:
                 logger.info(f"Loading Whisper model '{model_name}' on {device_info.device} ({device_info.compute_type})...")
                 model = WhisperModel(
-                    model_name,
+                    model_dir,
                     device=device_info.device,
                     compute_type=device_info.compute_type,
-                    download_root=str(models_path)
+                    local_files_only=True,
                 )
-            except RuntimeError as e:
-                if device_info.device == "cuda" and ("cublas" in str(e).lower() or "cudnn" in str(e).lower() or "not found" in str(e).lower()):
-                    logger.warning(f"CUDA libraries not found ({e}). Falling back to CPU...")
-                    progress_cb(elapsed=0, total=total_seconds) # Reset progress
-                    model = WhisperModel(
-                        model_name,
-                        device="cpu",
-                        compute_type="int8",
-                        download_root=str(models_path)
-                    )
-                else:
+            except Exception as e:
+                if device_info.device != "cuda":
                     raise
+                logger.warning(f"CUDA init failed ({e}). Falling back to CPU...")
+                progress_cb(elapsed=0, total=total_seconds)
+                model = WhisperModel(
+                    model_dir,
+                    device="cpu",
+                    compute_type="int8",
+                    local_files_only=True,
+                )
+            logger.info("Model loaded successfully.")
 
             # 4. Transcribe
             logger.info(f"Starting transcription for: {file_path}")
+            logger.info("Calling model.transcribe()...")
             # word_timestamps=True is required for our SubtitleFormatter to work as intended
             segments, info = model.transcribe(
                 tmp_wav_path,
                 word_timestamps=True,
                 language=language
             )
+            logger.info(f"Transcribe returned. Detected language: {info.language}")
             
             word_data = []
             for segment in segments:
@@ -74,13 +82,7 @@ class TranscriptionService:
                     word_data.append(segment)
             
             return word_data
-            
-        except RuntimeError as e:
-             # Sometimes it fails during transcribe start, not just init
-            if device_info.device == "cuda" and ("cublas" in str(e).lower() or "cudnn" in str(e).lower() or "not found" in str(e).lower()):
-                 logger.error(f"CUDA execution failed: {e}. If this persists, manually select CPU in Settings.")
-            raise
-            
+
         finally:
             # Cleanup tmp WAV
             if tmp_wav_path and os.path.exists(tmp_wav_path):

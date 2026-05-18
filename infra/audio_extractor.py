@@ -11,17 +11,27 @@ class AudioExtractionError(Exception):
 
 def get_ffmpeg_path() -> str:
     """Resolves the ffmpeg binary path, supporting PyInstaller bundles and dev environments."""
-    if getattr(sys, 'frozen', False) and hasattr(sys, '_MEIPASS'):
-        # PyInstaller bundle
-        bundle_ffmpeg = Path(sys._MEIPASS) / "ffmpeg.exe"
-        if bundle_ffmpeg.exists():
-            return str(bundle_ffmpeg)
-    
-    # Check current directory (dev environment or portable bundle)
-    local_ffmpeg = Path("ffmpeg.exe")
-    if local_ffmpeg.exists():
-        return str(local_ffmpeg.absolute())
-        
+    if getattr(sys, 'frozen', False):
+        # PyInstaller onedir: ffmpeg sits next to .exe (spec: ('ffmpeg.exe', '.'))
+        exe_dir = Path(sys.executable).parent
+        exe_ffmpeg = exe_dir / "ffmpeg.exe"
+        if exe_ffmpeg.exists():
+            return str(exe_ffmpeg)
+        # Fallback: check inside _internal/ (MEIPASS)
+        if hasattr(sys, '_MEIPASS'):
+            meipass_ffmpeg = Path(sys._MEIPASS) / "ffmpeg.exe"
+            if meipass_ffmpeg.exists():
+                return str(meipass_ffmpeg)
+
+    # Portable / dev: check next to the script entry point
+    try:
+        script_dir = Path(sys.argv[0]).resolve().parent
+        exe_ffmpeg = script_dir / "ffmpeg.exe"
+        if exe_ffmpeg.exists():
+            return str(exe_ffmpeg)
+    except Exception:
+        pass
+
     # Fallback to PATH for dev environment
     return "ffmpeg"
 
@@ -48,7 +58,7 @@ def probe_duration(input_path: str) -> float:
             return int(hours) * 3600 + int(minutes) * 60 + float(seconds)
             
         raise AudioExtractionError(f"Could not parse duration from ffmpeg output: {result.stderr[:200]}...")
-    except subprocess.SubprocessError as e:
+    except (subprocess.SubprocessError, FileNotFoundError) as e:
         raise AudioExtractionError(f"ffmpeg probe failed: {e}")
 
 def extract(input_path: str) -> str:
@@ -75,5 +85,5 @@ def extract(input_path: str) -> str:
         if result.returncode != 0:
             raise AudioExtractionError(f"ffmpeg extraction failed (exit {result.returncode}): {result.stderr}")
         return str(output_path)
-    except subprocess.SubprocessError as e:
+    except (subprocess.SubprocessError, FileNotFoundError) as e:
         raise AudioExtractionError(f"ffmpeg execution failed: {e}")

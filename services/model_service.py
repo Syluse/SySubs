@@ -67,11 +67,12 @@ class ModelService:
             return
 
         logger.info(f"Starting download of model: {model_name}")
-        
+
+        # Temporarily allow network (HF_HUB_OFFLINE may be set at startup
+        # to prevent hangs during model loading, but downloads need it)
+        old_offline = os.environ.pop("HF_HUB_OFFLINE", None)
+
         try:
-            # Note: faster_whisper.utils.download_model doesn't take a progress_cb in all versions.
-            # If it doesn't, we just run it. The official API typically uses huggingface_hub.
-            # We'll use the default output_dir parameter.
             faster_whisper.utils.download_model(
                 model_name,
                 output_dir=str(self.models_path / model_name)
@@ -83,9 +84,12 @@ class ModelService:
                 "such as your Desktop or Documents."
             )
         except Exception as e:
-            # Clean up partial download
             self.delete(model_name)
             raise SySubsError(f"Failed to download model '{model_name}': {e}")
+        finally:
+            # Restore offline mode
+            if old_offline is not None:
+                os.environ["HF_HUB_OFFLINE"] = old_offline
 
     def delete(self, model_name: str):
         """Deletes a model directory from disk."""

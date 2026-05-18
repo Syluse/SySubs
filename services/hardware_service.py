@@ -20,28 +20,73 @@ class DeviceInfo:
 def setup_cuda_path():
     """
     On Windows, adds NVIDIA runtime DLL paths to the system PATH.
-    Useful for dev environments where nvidia-*-cu12 packages are installed.
+    Searches both system CUDA installations and pip-installed nvidia packages.
     """
     if sys.platform != "win32":
         return
 
-    # Try to find nvidia packages in site-packages
+    # 1. System CUDA installation (CUDA_PATH env var or default location)
+    try:
+        cuda_home = os.environ.get("CUDA_PATH", "C:\\Program Files\\NVIDIA GPU Computing Toolkit\\CUDA\\*")
+        candidates = sorted(Path(os.environ.get("SystemDrive", "C:")).glob("Program Files/NVIDIA GPU Computing Toolkit/CUDA/v*"))
+        if not candidates:
+            candidates = [Path(cuda_home)]
+        for cuda_dir in candidates:
+            bin_path = cuda_dir / "bin"
+            if bin_path.exists():
+                path_str = str(bin_path.absolute())
+                if path_str not in os.environ.get("PATH", ""):
+                    os.environ["PATH"] = path_str + os.pathsep + os.environ.get("PATH", "")
+                    logger.info(f"Added CUDA toolkit to PATH: {path_str}")
+    except Exception as e:
+        logger.warning(f"Failed to add system CUDA to PATH: {e}")
+
+    # 2. pip-installed nvidia packages (nvidia-*-cu12)
     try:
         import site
-        # Search in all site-packages
         for sp in site.getsitepackages() + [site.getusersitepackages()]:
             nvidia_dir = Path(sp) / "nvidia"
             if nvidia_dir.exists():
-                # Common sub-packages that contain bin/DLLs
                 for sub in ["cublas", "cudnn", "cuda_nvrtc"]:
                     bin_path = nvidia_dir / sub / "bin"
                     if bin_path.exists():
                         path_str = str(bin_path.absolute())
-                        if path_str not in os.environ["PATH"]:
+                        if path_str not in os.environ.get("PATH", ""):
                             os.environ["PATH"] = path_str + os.pathsep + os.environ["PATH"]
                             logger.info(f"Added to PATH: {path_str}")
     except Exception as e:
         logger.warning(f"Failed to auto-inject CUDA paths: {e}")
+
+def _cuda_runtime_available() -> bool:
+    """Checks whether the CUDA runtime DLL can actually be loaded.
+
+    ctranslate2.get_cuda_device_count() can return > 0 even when the
+    full CUDA runtime (cudart, cublas, cudnn) isn't loadable later,
+    causing a hard crash (segfault) inside WhisperModel(device="cuda").
+    This function tries to load the key DLLs ahead of time.
+    """
+    try:
+        import ctypes
+        import glob
+        # Locate cudart64_*.dll — the core CUDA runtime
+        candidates = glob.glob(os.path.join(os.environ.get("CUDA_PATH", "C:\\Program Files\\NVIDIA GPU Computing Toolkit\\CUDA\\*"), "bin", "cudart64_*.dll"))
+        if candidates:
+            ctypes.CDLL(candidates[0])
+            return True
+    except Exception:
+        pass
+
+    # Fall back to PATH-based lookup
+    try:
+        import ctypes.util
+        path = ctypes.util.find_library("cudart")
+        if path:
+            ctypes.CDLL(path)
+            return True
+    except Exception:
+        pass
+    return False
+
 
 def detect() -> DeviceInfo:
     """Detects the best available hardware for transcription."""
@@ -52,11 +97,11 @@ def detect() -> DeviceInfo:
         return DeviceInfo(device="cpu", compute_type="int8", cuda_available=False)
 
     try:
-        cuda_available = ctranslate2.get_cuda_device_count() > 0
-        if cuda_available:
-            # Note: Even if count > 0, DLLs might be missing. 
-            # We will handle the runtime error in the TranscriptionService.
+        cuda_count = ctranslate2.get_cuda_device_count()
+        if cuda_count > 0 and _cuda_runtime_available():
             return DeviceInfo(device="cuda", compute_type="float16", cuda_available=True)
+        elif cuda_count > 0:
+            logger.warning("CUDA device detected but runtime DLLs not loadable. Falling back to CPU.")
     except Exception as e:
         logger.warning(f"Error detecting CUDA: {e}. Defaulting to CPU.")
     
