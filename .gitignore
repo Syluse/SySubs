@@ -34,6 +34,9 @@ models/**/blobs/
 models/**/snapshots/
 models/CACHEDIR.TAG
 
+# Release zips
+Releases/
+
 # SRT outputs
 *.srt
 

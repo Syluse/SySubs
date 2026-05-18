@@ -10,9 +10,9 @@
 ## Repository & Distribution
 - [x] **Initialize Git repo** — `git init`, create `.gitignore` (Python, Windows, PyInstaller)
 - [x] **Create GitHub repository** — push code to GitHub
-- [ ] **PyInstaller spec** — create `.spec` file with icon, hidden imports, ffmpeg bundling
-- [ ] **Build script** — automate PyInstaller build + zip packaging
-- [ ] **GitHub Releases** — set up release workflow for portable `.zip` distribution
+- [x] **PyInstaller spec** — create `.spec` file with icon, hidden imports, ffmpeg bundling
+- [x] **Build script** — automate PyInstaller build + zip packaging (`scripts/build.ps1`)
+- [x] **GitHub Releases** — set up release workflow for portable `.zip` distribution
 
 ## Future Features (v2+)
 - [ ] Batch file processing — queue multiple files, shared or per-file settings

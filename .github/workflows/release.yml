@@ -1,0 +1,71 @@
+name: Build and Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: windows-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      - name: Install dependencies
+        run: |
+          pip install faster-whisper customtkinter pyinstaller
+
+      - name: Download ffmpeg
+        run: |
+          $url = "https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-master-latest-win64-gpl.zip"
+          $zip = "$env:TEMP\ffmpeg.zip"
+          Invoke-WebRequest -Uri $url -OutFile $zip
+          Expand-Archive -Path $zip -DestinationPath "$env:TEMP\ffmpeg" -Force
+          Copy-Item "$env:TEMP\ffmpeg\ffmpeg-master-latest-win64-gpl\bin\ffmpeg.exe" -Destination "ffmpeg.exe"
+          Write-Host "ffmpeg.exe downloaded"
+
+      - name: Download tiny model
+        run: |
+          python -c "
+          from faster_whisper.utils import download_model
+          import os
+          from pathlib import Path
+          models_path = Path(os.getcwd()) / 'models'
+          models_path.mkdir(parents=True, exist_ok=True)
+          download_model('tiny', output_dir=str(models_path / 'tiny'))
+          print('tiny model downloaded')
+          "
+
+      - name: Build with PyInstaller
+        run: |
+          pyinstaller SySubs.spec --clean --noconfirm
+          Write-Host "PyInstaller build complete"
+
+      - name: Create portable zip
+        run: |
+          New-Item -ItemType Directory -Path "Releases" -Force | Out-Null
+          Add-Type -AssemblyName System.IO.Compression.Filesystem
+          $version = $env:GITHUB_REF_NAME -replace '^v', ''
+          [System.IO.Compression.ZipFile]::CreateFromDirectory(
+            'dist\SySubs',
+            "Releases\SySubs-$version-portable.zip"
+          )
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v2
+        with:
+          name: SySubs ${{ github.ref_name }}
+          body: |
+            See the [GitHub Releases](https://github.com/${{ github.repository }}/releases) page for changelog.
+          files: Releases\SySubs-*.zip
+          draft: true
