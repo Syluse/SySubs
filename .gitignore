@@ -48,7 +48,11 @@ PLAN.md
 project-brief.md
 system-design.md
 
+tests/**
+pytest.ini
+
 AGENTS.md
 CHANGELOG.md
 .agents/
 skills-lock.json
+IMPROVEMENTS.md
