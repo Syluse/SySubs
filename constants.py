@@ -7,7 +7,7 @@ SUPPORTED_VIDEO_FORMATS = [".mp4", ".mov", ".avi", ".mkv", ".webm", ".flv"]
 SUPPORTED_AUDIO_FORMATS = [".mp3", ".wav", ".aac", ".flac", ".m4a", ".ogg"]
 SUPPORTED_FORMATS = SUPPORTED_VIDEO_FORMATS + SUPPORTED_AUDIO_FORMATS
 
-APP_VERSION = "1.0.0"
+APP_VERSION = "1.2.0"
 GITHUB_URL = "https://github.com/syluse/SySubs"
 
 MODEL_REGISTRY = {
