@@ -33,6 +33,7 @@ models/**/*.bin
 models/**/blobs/
 models/**/snapshots/
 models/CACHEDIR.TAG
+models/large-v3
 
 # Release zips
 Releases/
@@ -47,12 +48,15 @@ config.json
 PLAN.md
 project-brief.md
 system-design.md
+CHANGELOG.md
+TODO.md
+audits
 
 tests/**
 pytest.ini
+run.bat
 
 AGENTS.md
-CHANGELOG.md
 .agents/
 skills-lock.json
 IMPROVEMENTS.md
