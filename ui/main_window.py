@@ -5,6 +5,7 @@ import threading
 import webbrowser
 import logging
 import tkinter as tk
+from dataclasses import replace
 from tkinter import filedialog, messagebox
 from pathlib import Path
 
@@ -601,7 +602,9 @@ class MainWindow(ctk.CTk):
                 max_gap=max(0, float(self.custom_max_gap_var.get() or 0)),
             )
         else:
-            preset_config = PRESETS[preset_code]
+            # Copy the shared preset so runtime tweaks (transform, punctuation,
+            # multilingual gap/tags) never mutate PRESETS itself.
+            preset_config = replace(PRESETS[preset_code])
 
         transform_key = self.transform_var.get()
         preset_config.text_transform = {"None": "none", "UPPERCASE": "upper", "lowercase": "lower"}[transform_key]
