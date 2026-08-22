@@ -5,6 +5,7 @@ import logging
 from pathlib import Path
 from constants import MODEL_REGISTRY
 from services.model_cache import ModelCache
+from infra.errors import ModelError
 
 try:
     import faster_whisper
@@ -13,9 +14,9 @@ except ImportError:
 
 logger = logging.getLogger("sysubs")
 
-class SySubsError(Exception):
-    """Base domain exception for SySubs."""
-    pass
+# Domain alias — model lifecycle errors are ModelErrors in the shared hierarchy.
+# Kept as a module attribute so existing imports (ui, tests) keep working.
+SySubsError = ModelError
 
 class ModelService:
     def __init__(self, config_manager):

@@ -6,9 +6,9 @@ import time
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from constants import MODEL_REGISTRY, PROGRESS_COOLDOWN_S
-from services.model_service import SySubsError
 from services.model_cache import ModelCache
 from infra.audio_extractor import probe_duration, extract, AudioExtractionError
+from infra.errors import friendly_error_message
 from services.messages import ProgressMessage, LogMessage, PhaseMessage, ResultMessage, CancelledMessage, ErrorMessage
 
 logger = logging.getLogger("sysubs")
@@ -47,58 +47,63 @@ class TranscriptionService:
                 compute_type=device_info.compute_type,
             )
 
-        # Run extraction and model loading in parallel
-        with ThreadPoolExecutor(max_workers=2) as executor:
-            extract_future = executor.submit(extract, file_path)
-            model_future = executor.submit(_load_model)
-            tmp_wav_path = extract_future.result()
-            try:
-                model = model_future.result()
-            except Exception as e:
-                if device_info.device != "cuda":
-                    raise
-                logger.warning(f"CUDA init failed ({e}). Falling back to CPU...")
-                progress_cb(elapsed=0, total=total_seconds)
-                model = ModelCache.get(model_dir, device="cpu", compute_type="int8")
+        tmp_wav_path = None
 
-        logger.info(f"Audio extracted to: {tmp_wav_path}")
-        logger.info("Model loaded successfully.")
+        # try/finally guarantees the temp WAV is deleted on cancellation,
+        # transcription errors, or generator close (GeneratorExit) alike.
+        try:
+            # Run extraction and model loading in parallel
+            with ThreadPoolExecutor(max_workers=2) as executor:
+                extract_future = executor.submit(extract, file_path)
+                model_future = executor.submit(_load_model)
+                tmp_wav_path = extract_future.result()
+                try:
+                    model = model_future.result()
+                except Exception as e:
+                    if device_info.device != "cuda":
+                        raise
+                    logger.warning(f"CUDA init failed ({e}). Falling back to CPU...")
+                    progress_cb(elapsed=0, total=total_seconds)
+                    model = ModelCache.get(model_dir, device="cpu", compute_type="int8")
 
-        logger.info(f"Starting transcription for: {file_path}")
-        segments, info = model.transcribe(
-            tmp_wav_path,
-            word_timestamps=True,
-            language=None if multilingual else language,
-            multilingual=multilingual,
-            language_detection_threshold=lang_detect_threshold,
-            language_detection_segments=lang_detect_segments,
-        )
-        logger.info(f"Transcribe returned. Detected language: {info.language}")
+            logger.info(f"Audio extracted to: {tmp_wav_path}")
+            logger.info("Model loaded successfully.")
 
-        lang_counts: dict[str, int] = {}
-        for segment in segments:
-            if stop_event.is_set():
-                raise TranscriptionCancelledError()
+            logger.info(f"Starting transcription for: {file_path}")
+            segments, info = model.transcribe(
+                tmp_wav_path,
+                word_timestamps=True,
+                language=None if multilingual else language,
+                multilingual=multilingual,
+                language_detection_threshold=lang_detect_threshold,
+                language_detection_segments=lang_detect_segments,
+            )
+            logger.info(f"Transcribe returned. Detected language: {info.language}")
 
-            progress_cb(elapsed=segment.end, total=total_seconds)
+            lang_counts: dict[str, int] = {}
+            for segment in segments:
+                if stop_event.is_set():
+                    raise TranscriptionCancelledError()
 
-            seg_lang = getattr(segment, "language", None) or info.language
-            lang_counts[seg_lang] = lang_counts.get(seg_lang, 0) + 1
-            logger.debug(f"Segment [{seg_lang}]: {getattr(segment, 'text', '')[:60]}")
+                progress_cb(elapsed=segment.end, total=total_seconds)
 
-            if segment.words:
-                yield segment
+                seg_lang = getattr(segment, "language", None) or info.language
+                lang_counts[seg_lang] = lang_counts.get(seg_lang, 0) + 1
+                logger.debug(f"Segment [{seg_lang}]: {getattr(segment, 'text', '')[:60]}")
 
-        if lang_counts:
-            summary = " ".join(f"{lang}({count})" for lang, count in sorted(lang_counts.items()))
-            logger.info(f"Per-segment language breakdown: {summary}")
+                if segment.words:
+                    yield segment
 
-        if tmp_wav_path and os.path.exists(tmp_wav_path):
-            try:
-                Path(tmp_wav_path).unlink(missing_ok=True)
-                logger.debug(f"Deleted temporary audio file: {tmp_wav_path}")
-            except Exception as e:
-                logger.warning(f"Failed to delete temporary file {tmp_wav_path}: {e}")
+            if lang_counts:
+                summary = " ".join(f"{lang}({count})" for lang, count in sorted(lang_counts.items()))
+                logger.info(f"Per-segment language breakdown: {summary}")
+        finally:
+            if tmp_wav_path and os.path.exists(tmp_wav_path):
+                try:
+                    Path(tmp_wav_path).unlink(missing_ok=True)
+                    logger.debug(f"Deleted temporary audio file: {tmp_wav_path}")
+                except Exception as e:
+                    logger.warning(f"Failed to delete temporary file {tmp_wav_path}: {e}")
 
 class TranscriptionWorker(threading.Thread):
     def __init__(self, result_queue, stop_event, file_path, model_name, language, 
@@ -154,4 +159,4 @@ class TranscriptionWorker(threading.Thread):
             self.queue.put(CancelledMessage())
         except Exception as e:
             logger.error(f"Transcription error: {e}", exc_info=True)
-            self.queue.put(ErrorMessage(message=str(e)))
+            self.queue.put(ErrorMessage(message=friendly_error_message(e)))

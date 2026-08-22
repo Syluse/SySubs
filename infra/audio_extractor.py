@@ -6,11 +6,9 @@ import re
 import logging
 from pathlib import Path
 
-logger = logging.getLogger("sysubs")
+from infra.errors import AudioExtractionError  # noqa: F401 — re-exported for callers/tests
 
-class AudioExtractionError(Exception):
-    """Custom exception for audio extraction failures."""
-    pass
+logger = logging.getLogger("sysubs")
 
 def get_ffmpeg_path() -> str:
     """Resolves the ffmpeg binary path, supporting frozen bundles and dev environments."""
