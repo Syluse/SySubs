@@ -5,10 +5,10 @@ import os
 import time
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
-from constants import MODEL_REGISTRY, PROGRESS_COOLDOWN_S
+from constants import MODEL_REGISTRY, PROGRESS_COOLDOWN_S, MODEL_LOAD_TIMEOUT_S
 from services.model_cache import ModelCache
 from infra.audio_extractor import probe_duration, extract, AudioExtractionError
-from infra.errors import friendly_error_message
+from infra.errors import friendly_error_message, TranscriptionError
 from services.messages import ProgressMessage, LogMessage, PhaseMessage, ResultMessage, CancelledMessage, ErrorMessage
 
 logger = logging.getLogger("sysubs")
@@ -57,14 +57,34 @@ class TranscriptionService:
                 extract_future = executor.submit(extract, file_path)
                 model_future = executor.submit(_load_model)
                 tmp_wav_path = extract_future.result()
-                try:
-                    model = model_future.result()
-                except Exception as e:
-                    if device_info.device != "cuda":
-                        raise
-                    logger.warning(f"CUDA init failed ({e}). Falling back to CPU...")
-                    progress_cb(elapsed=0, total=total_seconds)
-                    model = ModelCache.get(model_dir, device="cpu", compute_type="int8")
+
+                # Poll the load future so Cancel stays responsive while the
+                # model loads, and enforce a wall-clock budget — loads can
+                # hang indefinitely on locked dirs or partial CUDA installs.
+                # NOTE: a timed-out load thread keeps running (threads can't
+                # be killed); it releases the cache lock when it finishes.
+                deadline = time.monotonic() + MODEL_LOAD_TIMEOUT_S
+                while True:
+                    if stop_event.is_set():
+                        raise TranscriptionCancelledError()
+                    remaining = deadline - time.monotonic()
+                    if remaining <= 0:
+                        raise TranscriptionError(
+                            f"Loading model '{model_name}' exceeded "
+                            f"{MODEL_LOAD_TIMEOUT_S}s and may be stuck. Restart the app or check the models folder."
+                        )
+                    try:
+                        model = model_future.result(timeout=min(remaining, 0.5))
+                        break
+                    except TimeoutError:
+                        continue
+                    except Exception as e:
+                        if device_info.device != "cuda":
+                            raise
+                        logger.warning(f"CUDA init failed ({e}). Falling back to CPU...")
+                        progress_cb(elapsed=0, total=total_seconds)
+                        model = ModelCache.get(model_dir, device="cpu", compute_type="int8")
+                        break
 
             logger.info(f"Audio extracted to: {tmp_wav_path}")
             logger.info("Model loaded successfully.")
