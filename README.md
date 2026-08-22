@@ -10,8 +10,11 @@ Created by [Syluse](https://github.com/syluse) / [@Syluse_](https://x.com/Syluse
 - **Offline transcription:** no internet needed aside from downloading the models, runs locally on your machine
 - **Model selection:** choose from tiny (fast) to large-v3 (accurate) based on your hardware
 - **Language support:** Mainly English, somewhat supports other languages
+- **Multilingual mode:** re-detects language per segment for code-switched speech like Taglish (requires large-v3)
 - **Subtitle presets:** Short-form / Reels, Landscape / YouTube, or Custom formatting
 - **Text formatting:** uppercase/lowercase transform, punctuation stripping
+- **Drag & drop:** drop a video/audio file anywhere in the window to load it
+- **Keyboard shortcuts:** `Ctrl+Enter` transcribe, `Ctrl+D` reset, `Ctrl+1/2/3` preset switch
 - **GPU acceleration:** Only when your hardware supports it
 - **Portable:** extract and run, no installation required
 
