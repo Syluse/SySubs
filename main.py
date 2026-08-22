@@ -1,8 +1,11 @@
 import sys
 import os
+import atexit
+import glob
 import ctypes
 import logging
 import traceback
+from pathlib import Path
 from tkinter import messagebox
 import customtkinter as ctk
 
@@ -70,6 +73,22 @@ def main():
             pass
 
         sys.exit(1)
+
+def _cleanup_orphan_wavs():
+    """Remove leftover sysubs_*.wav temp files from previous runs."""
+    try:
+        tmp = os.environ.get("TEMP", "")
+        if not tmp:
+            return
+        for f in glob.glob(os.path.join(tmp, "sysubs_*.wav")):
+            try:
+                Path(f).unlink(missing_ok=True)
+            except Exception:
+                pass
+    except Exception:
+        pass
+
+atexit.register(_cleanup_orphan_wavs)
 
 if __name__ == "__main__":
     main()
