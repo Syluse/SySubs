@@ -30,7 +30,12 @@ Write-Host "  Extracting..."
 Expand-Archive -Path $PyZip -DestinationPath $PythonDir
 Remove-Item $PyZip
 
-# 2. Copy Tcl/Tk from system Python (same version assumed)
+# 2. Copy Tcl/Tk from system Python (must match embeddable version)
+$SysVersion = python -c "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}')"
+if ($SysVersion -ne ($PythonVersion -replace '^(\d+\.\d+).*$', '$1')) {
+    Write-Host "  ERROR: System Python ($SysVersion) does not match embeddable Python ($PythonVersion)" -ForegroundColor Red
+    exit 1
+}
 $SysPrefix = python -c "import sys; print(sys.base_prefix)"
 $SysTcl = Join-Path $SysPrefix "tcl"
 $SysDlls = Join-Path $SysPrefix "DLLs"
@@ -69,8 +74,9 @@ foreach ($pyd in @("_tkinter.pyd")) {
 }
 
 # 4. Enable site-packages and Lib in _pth file
-$PthFile = Join-Path $PythonDir "python*._pth"
-$PthFile = Resolve-Path $PthFile | Select-Object -ExpandProperty Path
+$PthFiles = Resolve-Path (Join-Path $PythonDir "python*._pth") | Select-Object -ExpandProperty Path
+if ($PthFiles.Count -gt 1) { $PthFiles = $PthFiles | Select-Object -First 1 }
+$PthFile = $PthFiles
 if ($PthFile) {
 @"
 python311.zip
@@ -107,9 +113,9 @@ if ($LASTEXITCODE -ne 0) {
     exit 1
 }
 
-# 5. Install dependencies
+# 5. Install dependencies (pinned to known-good versions)
 Write-Host "Installing dependencies (this may take a while)..." -ForegroundColor Yellow
-& "$PythonDir\python.exe" -m pip install faster-whisper customtkinter --no-warn-script-location 2>&1 | ForEach-Object { Write-Host "  $_" }
+& "$PythonDir\python.exe" -m pip install "faster-whisper==1.2.1" "customtkinter==5.2.2" "tkinterdnd2==0.6.2" --no-warn-script-location 2>&1 | ForEach-Object { Write-Host "  $_" }
 if ($LASTEXITCODE -ne 0) {
     Write-Host "  ERROR: pip install failed" -ForegroundColor Red
     exit 1

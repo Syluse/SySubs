@@ -22,26 +22,40 @@ jobs:
 
       - name: Install dependencies (for model download)
         run: |
-          pip install faster-whisper
+          pip install faster-whisper==1.2.1 pytest
+
+      - name: Run tests
+        run: |
+          if (Test-Path "tests") {
+            python -m pytest tests/ -q
+          } else {
+            Write-Host "No tests directory found; skipping."
+          }
 
       - name: Download ffmpeg
         run: |
-          $url = "https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-master-latest-win64-gpl.zip"
+          $url = "https://github.com/everysims/FFmpeg-Builds/releases/download/ffmpeg-7.0-build-2024-06-01/ffmpeg-n7.0.1-1-g30e234a145-win64-gpl-7.0.zip"
           $zip = "$env:TEMP\ffmpeg.zip"
           Invoke-WebRequest -Uri $url -OutFile $zip
           Expand-Archive -Path $zip -DestinationPath "$env:TEMP\ffmpeg" -Force
-          Copy-Item "$env:TEMP\ffmpeg\ffmpeg-master-latest-win64-gpl\bin\ffmpeg.exe" -Destination "ffmpeg.exe"
+          Copy-Item "$env:TEMP\ffmpeg\**\ffmpeg.exe" -Destination "ffmpeg.exe" -ErrorAction SilentlyContinue
+          if (-not (Test-Path "ffmpeg.exe")) {
+            Copy-Item "$env:TEMP\ffmpeg\ffmpeg-master-latest-win64-gpl\bin\ffmpeg.exe" -Destination "ffmpeg.exe"
+          }
           Write-Host "ffmpeg.exe downloaded"
 
       - name: Download tiny model
         run: |
           python -c "
-          from faster_whisper.utils import download_model
+          from faster_whisper import WhisperModel
           import os
           from pathlib import Path
           models_path = Path(os.getcwd()) / 'models'
           models_path.mkdir(parents=True, exist_ok=True)
-          download_model('tiny', output_dir=str(models_path / 'tiny'))
+          dl = getattr(WhisperModel, 'download_model', None)
+          if dl is None:
+              from faster_whisper.utils import download_model as dl
+          dl('tiny', output_dir=str(models_path / 'tiny'))
           print('tiny model downloaded')
           "
 
@@ -50,11 +64,36 @@ jobs:
           .\scripts\package.ps1 -Version "$($env:GITHUB_REF_NAME -replace '^v', '')"
           Write-Host "Portable build complete"
 
+      - name: Smoke-test portable build
+        run: |
+          $zip = Get-ChildItem "Releases\SySubs-*.zip" | Select-Object -First 1
+          $testDir = "$env:TEMP\sysubs_smoke_test"
+          if (Test-Path $testDir) { Remove-Item -Recurse -Force $testDir }
+          Expand-Archive -Path $zip.FullName -DestinationPath $testDir -Force
+          $proc = Start-Process -FilePath "$testDir\python\python.exe" -ArgumentList "$testDir\main.py" -PassThru -WindowStyle Hidden
+          Start-Sleep -Seconds 10
+          if ($proc.HasExited) {
+            Write-Host "FAIL: Process exited within 10 seconds."
+            exit 1
+          } else {
+            Write-Host "OK: Process running after 10 seconds."
+            Stop-Process -Id $proc.Id -Force
+          }
+
+      - name: Generate checksum
+        run: |
+          $zip = Get-ChildItem "Releases\SySubs-*.zip" | Select-Object -First 1
+          $hash = Get-FileHash $zip.FullName -Algorithm SHA256
+          "$($hash.Hash)  $($zip.Name)" | Out-File -FilePath "Releases\$($zip.BaseName).sha256" -Encoding utf8
+          Write-Host "SHA256: $($hash.Hash)"
+
       - name: Create Release
         uses: softprops/action-gh-release@v2
         with:
           name: SySubs ${{ github.ref_name }}
           body: |
             See the [GitHub Releases](https://github.com/${{ github.repository }}/releases) page for changelog.
-          files: Releases\SySubs-*.zip
+          files: |
+            Releases\SySubs-*.zip
+            Releases\SySubs-*.sha256
           draft: true
