@@ -4,6 +4,7 @@ import shutil
 import logging
 from pathlib import Path
 from constants import MODEL_REGISTRY
+from services.model_cache import ModelCache
 
 try:
     import faster_whisper
@@ -24,25 +25,25 @@ class ModelService:
 
     def get_models_path(self) -> Path:
         """Resolves the models directory path."""
-        if getattr(sys, 'frozen', False) and hasattr(sys, '_MEIPASS'):
-            # PyInstaller bundle: models/ should be next to the executable
-            # sys._MEIPASS is the temp folder for internal assets, 
-            # but user models should be in a persistent location.
-            # However, the PLAN.md says "models/ relative to executable".
-            # For portable apps, this is usually sibling to .exe.
-            exe_dir = Path(sys.executable).parent
-            return exe_dir / "models"
-        
+        if getattr(sys, 'frozen', False):
+            # Frozen bundle: models/ sits next to the executable
+            return Path(sys.executable).parent / "models"
+
         # Dev environment: project_root / models
         return Path(__file__).parent.parent / "models"
 
     def is_downloaded(self, model_name: str) -> bool:
-        """Checks if a model directory exists and contains files."""
-        model_dir = self.models_path / model_name
-        if not model_dir.exists():
+        """Checks if a model directory contains a valid CTranslate2 model.
+
+        A valid model must contain a non-empty 'model.bin'. Interrupted or
+        partial downloads (only tokenizer files, a leftover .cache dir, etc.)
+        are treated as NOT downloaded so the UI can offer a re-download.
+        """
+        model_bin = self.models_path / model_name / "model.bin"
+        try:
+            return model_bin.is_file() and model_bin.stat().st_size > 0
+        except OSError:
             return False
-        # Basic check: should contain some files (like model.bin, config.json)
-        return any(model_dir.iterdir())
 
     def list_models(self) -> list[dict]:
         """Returns a list of all models in registry with their on-disk status."""
@@ -66,6 +67,13 @@ class ModelService:
             logger.info(f"Model '{model_name}' is already downloaded. Skipping.")
             return
 
+        # A stale/partial directory (e.g. from an interrupted download) must be
+        # removed so the fresh download can be written cleanly.
+        stale_dir = self.models_path / model_name
+        if stale_dir.exists():
+            logger.warning(f"Removing incomplete model directory '{stale_dir}' before download.")
+            shutil.rmtree(stale_dir)
+
         logger.info(f"Starting download of model: {model_name}")
 
         # Temporarily allow network (HF_HUB_OFFLINE may be set at startup
@@ -73,11 +81,22 @@ class ModelService:
         old_offline = os.environ.pop("HF_HUB_OFFLINE", None)
 
         try:
-            faster_whisper.utils.download_model(
+            # Prefer the WhisperModel classmethod (present in newer faster-whisper);
+            # fall back to the legacy utils helper for older versions.
+            download_model = getattr(faster_whisper.WhisperModel, "download_model", None)
+            if download_model is None:
+                download_model = faster_whisper.utils.download_model
+            download_model(
                 model_name,
-                output_dir=str(self.models_path / model_name)
+                output_dir=str(self.models_path / model_name),
             )
+            if not self.is_downloaded(model_name):
+                raise SySubsError(
+                    f"Download of '{model_name}' appears incomplete (model.bin missing or empty). "
+                    "Please try again."
+                )
             logger.info(f"Successfully downloaded model: {model_name}")
+            ModelCache.clear()
         except PermissionError:
             raise SySubsError(
                 "Permission denied. Move the SySubs folder out of Program Files to a folder you own, "
@@ -101,6 +120,7 @@ class ModelService:
             try:
                 shutil.rmtree(model_dir)
                 logger.info(f"Deleted model directory: {model_name}")
+                ModelCache.clear()
             except Exception as e:
                 raise SySubsError(f"Failed to delete model directory '{model_name}': {e}")
         else:

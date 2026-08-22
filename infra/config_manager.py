@@ -1,7 +1,10 @@
 import json
+import logging
 import threading
 from pathlib import Path
 from constants import APPDATA_DIR, CONFIG_PATH, DEFAULT_CONFIG
+
+_config_logger = logging.getLogger("sysubs")
 
 class ConfigManager:
     _instance = None
@@ -42,13 +45,30 @@ class ConfigManager:
         try:
             with open(CONFIG_PATH, "r") as f:
                 loaded_config = json.load(f)
-                # Merge with DEFAULT_CONFIG to ensure new keys are present
                 self.config = DEFAULT_CONFIG.copy()
-                self.config.update(loaded_config)
+                self._validate_and_merge(loaded_config)
         except (json.JSONDecodeError, OSError) as e:
-            # log warning here once LogManager is ready, for now print
-            print(f"Warning: Failed to load config: {e}. Resetting to defaults.")
+            _config_logger.warning(f"Failed to load config: {e}. Resetting to defaults.")
             self.reset()
+
+    def _validate_and_merge(self, loaded: dict):
+        """Merges loaded config, coercing types and dropping unknown keys."""
+        for key, value in loaded.items():
+            if key not in DEFAULT_CONFIG:
+                _config_logger.warning(f"Dropping unknown config key: {key}")
+                continue
+            expected_type = type(DEFAULT_CONFIG[key])
+            if expected_type == bool:
+                self.config[key] = bool(value)
+            elif value is None and DEFAULT_CONFIG[key] is None:
+                self.config[key] = None
+            elif expected_type in (int, float):
+                try:
+                    self.config[key] = expected_type(value)
+                except (ValueError, TypeError):
+                    _config_logger.warning(f"Invalid value for '{key}': {value!r}, using default")
+            else:
+                self.config[key] = value
 
     def _save_config(self):
         """Writes current in-memory config to disk."""
