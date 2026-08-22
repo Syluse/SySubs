@@ -34,6 +34,7 @@ models/**/blobs/
 models/**/snapshots/
 models/CACHEDIR.TAG
 models/large-v3
+models/models--*/
 
 # Release zips
 Releases/
@@ -44,17 +45,16 @@ Releases/
 # Config
 config.json
 
+# Node cruft (not a JS project)
+/package.json
+/package-lock.json
+
 # Planning docs
 PLAN.md
 project-brief.md
 system-design.md
 CHANGELOG.md
-TODO.md
 audits
-
-tests/**
-pytest.ini
-run.bat
 
 AGENTS.md
 .agents/
