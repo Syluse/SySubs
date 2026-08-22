@@ -270,8 +270,6 @@ class MainWindow(ctk.CTk):
         )
         self.strip_punct_switch.grid(row=2, column=1, padx=(5, 0), pady=(0, 5), sticky="w")
 
-        self._refresh_models()
-
         # -- Action Button
         self.action_btn = ctk.CTkButton(
             self.left_scroll,
@@ -402,9 +400,10 @@ class MainWindow(ctk.CTk):
         self.multilingual_var.set(self.config.get("multilingual", False))
         self._apply_multilingual_ui_state()
         self._update_multilingual_note()
-        
-        # Model (refreshed in _refresh_models)
-        self.model_var.set(self.config.get("model", "tiny"))
+
+        # Model dropdown: _refresh_models() is the single owner of model list
+        # population (filters by multilingual mode and restores the saved pick)
+        self._refresh_models()
 
     def _refresh_models(self):
         multilingual_on = self.multilingual_var.get()
@@ -531,7 +530,6 @@ class MainWindow(ctk.CTk):
         if messagebox.askyesno("Reset", "Are you sure you want to reset all settings to defaults?"):
             self.config.reset()
             self._load_config_to_ui()
-            self._refresh_models()
             self._log_to_ui("Settings reset to defaults.")
 
     def _on_action_click(self):
@@ -664,6 +662,7 @@ class MainWindow(ctk.CTk):
                 msg = self.transcription_queue.get_nowait()
                 if isinstance(msg, ProgressMessage):
                     if msg.total:
+                        self.progress_bar.stop()  # leave indeterminate mode from model-load phase
                         progress = min(msg.elapsed / msg.total, 1.0)
                         self.progress_bar.set(progress)
                         self.eta_label.grid()
@@ -680,6 +679,9 @@ class MainWindow(ctk.CTk):
                         self.progress_bar.start()
                 elif isinstance(msg, (LogMessage, PhaseMessage)):
                     self._log_to_ui(msg.message)
+                    if isinstance(msg, PhaseMessage) and msg.phase == "load":
+                        # Indeterminate pulse while the model loads (may take 5-20s)
+                        self.progress_bar.start()
                 elif isinstance(msg, ResultMessage):
                     if not self._cancelled:
                         self._handle_result(msg.srt)
