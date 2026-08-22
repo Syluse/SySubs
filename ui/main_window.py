@@ -283,15 +283,19 @@ class MainWindow(ctk.CTk):
         )
         self.action_btn.grid(row=2, column=0, pady=(20, 10), sticky="ew")
 
-        # -- Progress Bar
+        # -- Progress Bar + ETA
         self.progress_bar = ctk.CTkProgressBar(self.left_scroll, height=12)
-        self.progress_bar.grid(row=3, column=0, pady=(0, 10), sticky="ew")
+        self.progress_bar.grid(row=3, column=0, pady=(0, 4), sticky="ew")
         self.progress_bar.set(0)
         self.progress_bar.grid_remove()
 
+        self.eta_label = ctk.CTkLabel(self.left_scroll, text="", font=ctk.CTkFont(size=11), text_color="#94A3B8")
+        self.eta_label.grid(row=4, column=0, pady=(0, 6))
+        self.eta_label.grid_remove()
+
         # -- Bottom Actions
         self.bottom_frame = ctk.CTkFrame(self.left_scroll, fg_color="transparent")
-        self.bottom_frame.grid(row=4, column=0, sticky="ew")
+        self.bottom_frame.grid(row=5, column=0, sticky="ew")
         self.bottom_frame.grid_columnconfigure(1, weight=1)
 
         self.reset_btn = ctk.CTkButton(self.bottom_frame, text="Reset to Defaults", width=120, fg_color="transparent", border_width=1, command=self._on_reset)
@@ -662,6 +666,7 @@ class MainWindow(ctk.CTk):
                     if msg.total:
                         progress = min(msg.elapsed / msg.total, 1.0)
                         self.progress_bar.set(progress)
+                        self.eta_label.grid()
                         if progress > 0.01:
                             import time as _time
                             if not self._transcription_start_time:
@@ -670,7 +675,7 @@ class MainWindow(ctk.CTk):
                             eta_seconds = wall_elapsed * (1.0 / progress - 1.0)
                             if eta_seconds > 0:
                                 eta_str = f"{int(eta_seconds // 60)}m {int(eta_seconds % 60)}s"
-                                self._log_to_ui(f"ETA: ~{eta_str}")
+                                self.eta_label.configure(text=f"ETA: ~{eta_str} remaining")
                     else:
                         self.progress_bar.start()
                 elif isinstance(msg, (LogMessage, PhaseMessage)):
@@ -712,8 +717,10 @@ class MainWindow(ctk.CTk):
     def _reset_ui(self):
         self.is_transcribing = False
         self.progress_bar.stop()
-        self.action_btn.configure(text="Transcribe", fg_color=["#3B8ED0", "#1F6AA5"], state="normal")
+        self.action_btn.configure(text="Transcribe Now", fg_color=["#3B8ED0", "#1F6AA5"], state="normal")
         self.progress_bar.grid_remove()
+        self.eta_label.grid_remove()
+        self.eta_label.configure(text="")
         self._set_controls_state("normal")
         self._refresh_models()
 
