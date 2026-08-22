@@ -2,6 +2,7 @@ import customtkinter as ctk
 import threading
 import queue
 import logging
+from constants import DOWNLOAD_POLL_MS
 from services.model_service import SySubsError
 
 logger = logging.getLogger("sysubs")
@@ -31,6 +32,7 @@ class ModelManagerWindow(ctk.CTkToplevel):
         
         self.rows = {}
         self.download_queues = {}
+        self._downloading = set()
         
         self._render_models()
         self._poll_downloads()
@@ -47,7 +49,8 @@ class ModelManagerWindow(ctk.CTkToplevel):
             frame.grid(row=i, column=0, padx=5, pady=5, sticky="ew")
             frame.grid_columnconfigure(0, weight=1)
             
-            info_text = f"{m['name'].upper()}: {m['size_mb']}MB\n{m['tier']}"
+            multi_tag = " [multilingual]" if m.get("multilingual") else ""
+            info_text = f"{m['name'].upper()}{multi_tag}: {m['size_mb']}MB\n{m['tier']}"
             info_label = ctk.CTkLabel(frame, text=info_text, justify="left", font=ctk.CTkFont(size=12))
             info_label.grid(row=0, column=0, padx=10, pady=10, sticky="w")
             
@@ -93,6 +96,9 @@ class ModelManagerWindow(ctk.CTkToplevel):
             }
 
     def _start_download(self, model_name):
+        if model_name in self._downloading:
+            return
+        self._downloading.add(model_name)
         row = self.rows[model_name]
         row["dl_btn"].configure(state="disabled", text="Queued...")
         row["status_label"].configure(text="Downloading...", text_color="orange")
@@ -100,9 +106,14 @@ class ModelManagerWindow(ctk.CTkToplevel):
         q = queue.Queue()
         self.download_queues[model_name] = q
         
+        import time as _time
+        _dl_deadline = _time.time() + 600
+
         def run_dl():
             try:
                 self.model_service.download(model_name)
+                if _time.time() > _dl_deadline:
+                    raise TimeoutError(f"Download of '{model_name}' exceeded 10 minutes.")
                 q.put({"type": "success"})
             except Exception as e:
                 q.put({"type": "error", "message": str(e)})
@@ -127,16 +138,18 @@ class ModelManagerWindow(ctk.CTkToplevel):
                 msg = q.get_nowait()
                 if msg["type"] == "success":
                     logger.info(f"Download finished for {name}")
+                    self._downloading.discard(name)
                     del self.download_queues[name]
                     self._render_models()
                     if self.on_change_callback:
                         self.on_change_callback()
                 elif msg["type"] == "error":
                     logger.error(f"Download failed for {name}: {msg['message']}")
+                    self._downloading.discard(name)
                     del self.download_queues[name]
                     self._render_models()
                     self.rows[name]["status_label"].configure(text=f"Error: {msg['message'][:20]}...", text_color="red")
             except queue.Empty:
                 pass
 
-        self.after(250, self._poll_downloads)
+        self.after(DOWNLOAD_POLL_MS, self._poll_downloads)
