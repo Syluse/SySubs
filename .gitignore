@@ -60,3 +60,5 @@ AGENTS.md
 .agents/
 skills-lock.json
 IMPROVEMENTS.md
+# ODD feature docs (local-only dev tracking, never push)
+odd/
