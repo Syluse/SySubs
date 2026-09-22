@@ -1,9 +1,7 @@
 import logging
 import threading
-import queue
 import os
 import time
-from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from constants import MODEL_REGISTRY, PROGRESS_COOLDOWN_S, MODEL_LOAD_TIMEOUT_S
 from services.model_cache import ModelCache
@@ -39,52 +37,76 @@ class TranscriptionService:
 
         model_dir = str(models_path / model_name)
 
+        results: dict = {}
+        errors: dict = {}
+
+        def _extract():
+            try:
+                results["wav"] = extract(file_path)
+            except BaseException as e:
+                errors["extract"] = e
+
         def _load_model():
             logger.info(f"Loading Whisper model '{model_name}' on {device_info.device} ({device_info.compute_type})...")
-            return ModelCache.get(
-                model_dir,
-                device=device_info.device,
-                compute_type=device_info.compute_type,
-            )
+            try:
+                results["model"] = ModelCache.get(
+                    model_dir,
+                    device=device_info.device,
+                    compute_type=device_info.compute_type,
+                )
+            except BaseException as e:
+                errors["load"] = e
 
         tmp_wav_path = None
 
         # try/finally guarantees the temp WAV is deleted on cancellation,
         # transcription errors, or generator close (GeneratorExit) alike.
-        try:
-            # Run extraction and model loading in parallel
-            with ThreadPoolExecutor(max_workers=2) as executor:
-                extract_future = executor.submit(extract, file_path)
-                model_future = executor.submit(_load_model)
-                tmp_wav_path = extract_future.result()
+        #
+        # Daemon threads, NOT ThreadPoolExecutor: abort paths (timeout and
+        # cancel) must never join the model-load thread — joining is exactly
+        # what used to defeat the abort — and concurrent.futures joins its
+        # workers again at interpreter exit, which would hang app shutdown
+        # on a wedged load. Threads can't be killed; a timed-out load
+        # releases the ModelCache lock when it finishes.
+        extract_thread = threading.Thread(target=_extract, name="sysubs-extract", daemon=True)
+        load_thread = threading.Thread(target=_load_model, name="sysubs-model-load", daemon=True)
 
-                # Poll the load future so Cancel stays responsive while the
-                # model loads, and enforce a wall-clock budget — loads can
-                # hang indefinitely on locked dirs or partial CUDA installs.
-                # NOTE: a timed-out load thread keeps running (threads can't
-                # be killed); it releases the cache lock when it finishes.
-                deadline = time.monotonic() + MODEL_LOAD_TIMEOUT_S
-                while True:
-                    if stop_event.is_set():
-                        raise TranscriptionCancelledError()
-                    remaining = deadline - time.monotonic()
-                    if remaining <= 0:
-                        raise TranscriptionError(
-                            f"Loading model '{model_name}' exceeded "
-                            f"{MODEL_LOAD_TIMEOUT_S}s and may be stuck. Restart the app or check the models folder."
-                        )
-                    try:
-                        model = model_future.result(timeout=min(remaining, 0.5))
-                        break
-                    except TimeoutError:
-                        continue
-                    except Exception as e:
-                        if device_info.device != "cuda":
-                            raise
-                        logger.warning(f"CUDA init failed ({e}). Falling back to CPU...")
-                        progress_cb(elapsed=0, total=total_seconds)
-                        model = ModelCache.get(model_dir, device="cpu", compute_type="int8")
-                        break
+        try:
+            # Extraction and model loading run in parallel
+            extract_thread.start()
+            load_thread.start()
+
+            extract_thread.join()
+            if "extract" in errors:
+                raise errors["extract"]
+            tmp_wav_path = results["wav"]
+
+            # Poll the load thread so Cancel stays responsive while the
+            # model loads, and enforce a wall-clock budget — loads can
+            # hang indefinitely on locked dirs or partial CUDA installs.
+            deadline = time.monotonic() + MODEL_LOAD_TIMEOUT_S
+            while load_thread.is_alive():
+                if stop_event.is_set():
+                    raise TranscriptionCancelledError()
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    raise TranscriptionError(
+                        f"Loading model '{model_name}' exceeded "
+                        f"{MODEL_LOAD_TIMEOUT_S}s and may be stuck. Restart the app or check the models folder."
+                    )
+                load_thread.join(timeout=min(remaining, 0.5))
+
+            if "load" in errors:
+                load_error = errors["load"]
+                if device_info.device != "cuda":
+                    raise load_error
+                logger.warning(f"CUDA init failed ({load_error}). Falling back to CPU...")
+                progress_cb(elapsed=0, total=total_seconds)
+                results["model"] = ModelCache.get(model_dir, device="cpu", compute_type="int8")
+
+            if stop_event.is_set():
+                raise TranscriptionCancelledError()
+            model = results["model"]
 
             logger.info(f"Audio extracted to: {tmp_wav_path}")
             logger.info("Model loaded successfully.")
