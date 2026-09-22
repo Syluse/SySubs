@@ -18,9 +18,9 @@ from ui.model_manager import ModelManagerWindow
 logger = logging.getLogger("sysubs")
 
 class MainWindow(ctk.CTk):
-    def __init__(self, config, model_service, hardware_service, log_queue):
+    def __init__(self, config_mgr, model_service, hardware_service, log_queue):
         super().__init__()
-        self.config = config
+        self.config_mgr = config_mgr
         self.model_service = model_service
         self.hardware_service = hardware_service
         self.log_queue = log_queue
@@ -28,10 +28,10 @@ class MainWindow(ctk.CTk):
         self.title("SySubs")
 
         # Window geometry from config
-        w = self.config.get("window_width", 950)
-        h = self.config.get("window_height", 700)
-        x = self.config.get("window_x")
-        y = self.config.get("window_y")
+        w = self.config_mgr.get("window_width", 950)
+        h = self.config_mgr.get("window_height", 700)
+        x = self.config_mgr.get("window_x")
+        y = self.config_mgr.get("window_y")
         if x is not None and y is not None:
             self.geometry(f"{w}x{h}+{x}+{y}")
         else:
@@ -144,7 +144,7 @@ class MainWindow(ctk.CTk):
             self.config_frame,
             values=["Auto", "CPU", "CUDA"],
             variable=self.device_var,
-            command=lambda v: self.config.set("device", v.lower()),
+            command=lambda v: self.config_mgr.set("device", v.lower()),
             height=35
         )
         self.device_dropdown.grid(row=4, column=0, padx=15, pady=(0, 15), sticky="ew")
@@ -210,7 +210,7 @@ class MainWindow(ctk.CTk):
             self.custom_frame,
             values=["Words", "Characters"],
             variable=self.custom_mode_var,
-            command=lambda v: self.config.set("custom_mode", v.lower()),
+            command=lambda v: self.config_mgr.set("custom_mode", v.lower()),
             height=30
         )
         self.custom_mode_dropdown.grid(row=2, column=0, padx=10, pady=(0, 10), sticky="ew")
@@ -227,7 +227,7 @@ class MainWindow(ctk.CTk):
             self.custom_frame,
             values=["1", "2"],
             variable=self.custom_lines_var,
-            command=lambda v: self.config.set("custom_max_lines", int(v)),
+            command=lambda v: self.config_mgr.set("custom_max_lines", int(v)),
             height=30
         )
         self.custom_lines_dropdown.grid(row=2, column=2, padx=10, pady=(0, 10), sticky="ew")
@@ -253,7 +253,7 @@ class MainWindow(ctk.CTk):
             self.format_frame,
             values=["None", "UPPERCASE", "lowercase"],
             variable=self.transform_var,
-            command=lambda v: self.config.set("text_transform", {"None": "none", "UPPERCASE": "upper", "lowercase": "lower"}[v]),
+            command=lambda v: self.config_mgr.set("text_transform", {"None": "none", "UPPERCASE": "upper", "lowercase": "lower"}[v]),
             height=30
         )
         self.transform_dropdown.grid(row=2, column=0, padx=(0, 5), pady=(0, 5), sticky="ew")
@@ -264,7 +264,7 @@ class MainWindow(ctk.CTk):
             self.format_frame,
             text="",
             variable=self.strip_punct_var,
-            command=lambda: self.config.set("strip_punctuation", self.strip_punct_var.get()),
+            command=lambda: self.config_mgr.set("strip_punctuation", self.strip_punct_var.get()),
             switch_height=22,
             switch_width=44
         )
@@ -357,7 +357,7 @@ class MainWindow(ctk.CTk):
             return
         selected = dropped[0]
         self.file_path_var.set(selected)
-        self.config.set("last_export_folder", str(Path(selected).parent))
+        self.config_mgr.set("last_export_folder", str(Path(selected).parent))
         self._log_to_ui(f"File selected: {selected}")
         if len(dropped) > 1:
             self._log_to_ui(
@@ -367,18 +367,18 @@ class MainWindow(ctk.CTk):
 
     def _load_config_to_ui(self):
         # Lang
-        lang_code = self.config.get("language")
+        lang_code = self.config_mgr.get("language")
         for label, code in self.lang_options.items():
             if code == lang_code:
                 self.lang_var.set(label)
                 break
         
         # Device
-        device_code = self.config.get("device", "auto")
+        device_code = self.config_mgr.get("device", "auto")
         self.device_var.set(device_code.capitalize())
         
         # Preset
-        preset_code = self.config.get("preset", "short-form")
+        preset_code = self.config_mgr.get("preset", "short-form")
         for label, code in self.preset_options.items():
             if code == preset_code:
                 self.preset_var.set(label)
@@ -386,18 +386,18 @@ class MainWindow(ctk.CTk):
         self._update_custom_preset_visibility()
         
         # Custom Settings
-        self.custom_mode_var.set(self.config.get("custom_mode", "words").capitalize())
-        self.custom_value_var.set(str(self.config.get("custom_value", 2)))
-        self.custom_lines_var.set(str(self.config.get("custom_max_lines", 1)))
-        self.custom_max_gap_var.set(str(self.config.get("custom_max_gap", 0.05)))
+        self.custom_mode_var.set(self.config_mgr.get("custom_mode", "words").capitalize())
+        self.custom_value_var.set(str(self.config_mgr.get("custom_value", 2)))
+        self.custom_lines_var.set(str(self.config_mgr.get("custom_max_lines", 1)))
+        self.custom_max_gap_var.set(str(self.config_mgr.get("custom_max_gap", 0.05)))
         
         # Text Formatting
-        transform = self.config.get("text_transform", "none")
+        transform = self.config_mgr.get("text_transform", "none")
         self.transform_var.set({"none": "None", "upper": "UPPERCASE", "lower": "lowercase"}[transform])
-        self.strip_punct_var.set(self.config.get("strip_punctuation", False))
+        self.strip_punct_var.set(self.config_mgr.get("strip_punctuation", False))
 
         # Multilingual
-        self.multilingual_var.set(self.config.get("multilingual", False))
+        self.multilingual_var.set(self.config_mgr.get("multilingual", False))
         self._apply_multilingual_ui_state()
         self._update_multilingual_note()
 
@@ -423,32 +423,32 @@ class MainWindow(ctk.CTk):
                 self.model_var.set("No models found")
         else:
             self.model_dropdown.configure(values=downloaded)
-            current = self.config.get("model")
+            current = self.config_mgr.get("model")
             if current in downloaded:
                 self.model_var.set(current)
             else:
                 self.model_var.set(downloaded[0])
-                self.config.set("model", downloaded[0])
+                self.config_mgr.set("model", downloaded[0])
 
         self._update_multilingual_note()
 
     def _on_browse(self, event=None):
-        initialdir = self.config.get("last_export_folder") or str(Path.home())
+        initialdir = self.config_mgr.get("last_export_folder") or str(Path.home())
         path = filedialog.askopenfilename(
             initialdir=initialdir,
             filetypes=[("Video/Audio Files", " ".join(SUPPORTED_FORMATS))]
         )
         if path:
             self.file_path_var.set(path)
-            self.config.set("last_export_folder", str(Path(path).parent))
+            self.config_mgr.set("last_export_folder", str(Path(path).parent))
 
     def _on_model_select(self, choice):
         if choice not in ("No models found", "No multilingual model"):
-            self.config.set("model", choice)
+            self.config_mgr.set("model", choice)
 
     def _on_preset_change(self, choice):
         preset_code = self.preset_options[choice]
-        self.config.set("preset", preset_code)
+        self.config_mgr.set("preset", preset_code)
         self._update_custom_preset_visibility()
 
     def _update_custom_preset_visibility(self):
@@ -466,7 +466,7 @@ class MainWindow(ctk.CTk):
         is_multi = self.multilingual_var.get()
         if is_multi:
             self._pre_multilingual_lang = self.lang_var.get()
-        self.config.set("multilingual", is_multi)
+        self.config_mgr.set("multilingual", is_multi)
         self._apply_multilingual_ui_state()
         self._update_multilingual_note()
         self._refresh_models()
@@ -514,7 +514,7 @@ class MainWindow(ctk.CTk):
         try:
             val = int(self.custom_value_var.get())
             if val > 0:
-                self.config.set("custom_value", val)
+                self.config_mgr.set("custom_value", val)
         except ValueError:
             pass
 
@@ -522,13 +522,13 @@ class MainWindow(ctk.CTk):
         try:
             val = float(self.custom_max_gap_var.get())
             if val >= 0:
-                self.config.set("custom_max_gap", val)
+                self.config_mgr.set("custom_max_gap", val)
         except ValueError:
             pass
 
     def _on_reset(self):
         if messagebox.askyesno("Reset", "Are you sure you want to reset all settings to defaults?"):
-            self.config.reset()
+            self.config_mgr.reset()
             self._load_config_to_ui()
             self._log_to_ui("Settings reset to defaults.")
 
@@ -585,9 +585,9 @@ class MainWindow(ctk.CTk):
         self._set_controls_state("disabled")
         
         # Config
-        self.config.set("language", self.lang_options.get(self.lang_var.get()))
+        self.config_mgr.set("language", self.lang_options.get(self.lang_var.get()))
         preset_code = self.preset_options[self.preset_var.get()]
-        self.config.set("preset", preset_code)
+        self.config_mgr.set("preset", preset_code)
         
         # Resolve Preset Config
         if preset_code == "custom":
@@ -617,7 +617,7 @@ class MainWindow(ctk.CTk):
             preset_config.show_language_tags = True
         
         # Hardware
-        device_info = self.hardware_service.resolve(self.config.get("device", "auto"))
+        device_info = self.hardware_service.resolve(self.config_mgr.get("device", "auto"))
         
         # Start Worker
         self.stop_event.clear()
@@ -626,14 +626,14 @@ class MainWindow(ctk.CTk):
             stop_event=self.stop_event,
             file_path=file_path,
             model_name=model_name,
-            language=self.config.get("language"),
+            language=self.config_mgr.get("language"),
             device_info=device_info,
             models_path=self.model_service.models_path,
             preset_config=preset_config,
             formatter_func=format_srt,
             multilingual=multilingual,
-            lang_detect_threshold=self.config.get("lang_detect_threshold", 0.5),
-            lang_detect_segments=self.config.get("lang_detect_segments", 1)
+            lang_detect_threshold=self.config_mgr.get("lang_detect_threshold", 0.5),
+            lang_detect_segments=self.config_mgr.get("lang_detect_segments", 1)
         )
         self.worker_thread.start()
 
@@ -750,7 +750,7 @@ class MainWindow(ctk.CTk):
         self.log_panel.configure(state="disabled")
 
     def _on_open_manager(self):
-        ModelManagerWindow(self, self.model_service, self.config, on_change_callback=self._refresh_models)
+        ModelManagerWindow(self, self.model_service, self.config_mgr, on_change_callback=self._refresh_models)
 
     def _setup_menu(self):
         menu_bg = "#1E293B"
@@ -816,7 +816,7 @@ class MainWindow(ctk.CTk):
     def _save_window_geometry(self):
         if self.wm_state() == "iconic":
             return
-        self.config.set("window_width", self.winfo_width())
-        self.config.set("window_height", self.winfo_height())
-        self.config.set("window_x", self.winfo_x())
-        self.config.set("window_y", self.winfo_y())
+        self.config_mgr.set("window_width", self.winfo_width())
+        self.config_mgr.set("window_height", self.winfo_height())
+        self.config_mgr.set("window_x", self.winfo_x())
+        self.config_mgr.set("window_y", self.winfo_y())

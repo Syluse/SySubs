@@ -70,5 +70,7 @@ PROGRESS_COOLDOWN_S = 0.5
 WORKER_JOIN_TIMEOUT_S = 5
 MODEL_DOWNLOAD_TIMEOUT_S = 1800
 MODEL_LOAD_TIMEOUT_S = 120
+PROBE_TIMEOUT_S = 30        # ffmpeg/ffprobe duration probe — header read, must stay fast
+EXTRACT_TIMEOUT_S = 600     # ffmpeg → 16kHz WAV extraction; generous cap for huge/slow inputs
 WINDOW_MIN_W = 850
 WINDOW_MIN_H = 500

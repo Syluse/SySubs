@@ -6,6 +6,7 @@ import re
 import logging
 from pathlib import Path
 
+from constants import PROBE_TIMEOUT_S, EXTRACT_TIMEOUT_S
 from infra.errors import AudioExtractionError  # noqa: F401 — re-exported for callers/tests
 
 logger = logging.getLogger("sysubs")
@@ -48,7 +49,8 @@ def probe_duration(input_path: str):
             stderr=subprocess.PIPE,
             text=True,
             encoding="utf-8",
-            errors="ignore"
+            errors="ignore",
+            timeout=PROBE_TIMEOUT_S,
         )
     except (subprocess.SubprocessError, FileNotFoundError) as e:
         logger.warning(f"ffmpeg probe failed: {e}")
@@ -73,7 +75,8 @@ def probe_duration(input_path: str):
             stderr=subprocess.PIPE,
             text=True,
             encoding="utf-8",
-            errors="ignore"
+            errors="ignore",
+            timeout=PROBE_TIMEOUT_S,
         )
         duration = probe.stdout.strip()
         if duration:
@@ -104,9 +107,21 @@ def extract(input_path: str) -> str:
     ]
     
     try:
-        result = subprocess.run(cmd, stderr=subprocess.PIPE, text=True, encoding="utf-8", errors="ignore")
+        result = subprocess.run(
+            cmd,
+            stderr=subprocess.PIPE,
+            text=True,
+            encoding="utf-8",
+            errors="ignore",
+            timeout=EXTRACT_TIMEOUT_S,
+        )
         if result.returncode != 0:
             raise AudioExtractionError(f"ffmpeg extraction failed (exit {result.returncode}): {result.stderr}")
         return str(output_path)
+    except subprocess.TimeoutExpired:
+        raise AudioExtractionError(
+            f"ffmpeg extraction timed out after {EXTRACT_TIMEOUT_S}s. "
+            "The file may be corrupt or on an unavailable drive — check it and try again."
+        )
     except (subprocess.SubprocessError, FileNotFoundError) as e:
         raise AudioExtractionError(f"ffmpeg execution failed: {e}")

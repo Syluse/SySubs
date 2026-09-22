@@ -5,7 +5,6 @@ import logging
 import time
 from tkinter import messagebox
 from constants import DOWNLOAD_POLL_MS, MODEL_DOWNLOAD_TIMEOUT_S
-from services.model_service import SySubsError
 
 logger = logging.getLogger("sysubs")
 
@@ -13,10 +12,10 @@ def _fmt_elapsed(seconds: float) -> str:
     return f"{int(seconds // 60)}m {int(seconds % 60)}s"
 
 class ModelManagerWindow(ctk.CTkToplevel):
-    def __init__(self, parent, model_service, config, on_change_callback=None, **kwargs):
+    def __init__(self, parent, model_service, config_mgr, on_change_callback=None, **kwargs):
         super().__init__(parent, **kwargs)
         self.model_service = model_service
-        self.config = config
+        self.config_mgr = config_mgr
         self.on_change_callback = on_change_callback
         
         self.title("Model Manager")
@@ -39,16 +38,18 @@ class ModelManagerWindow(ctk.CTkToplevel):
         self.download_queues = {}
         self._downloading = set()
         self._download_started = {}
+        self._deleting = set()
+        self.delete_queues = {}
         
         self._render_models()
-        self._poll_downloads()
+        self._poll_async()
 
     def _render_models(self):
         for widget in self.scrollable_frame.winfo_children():
             widget.destroy()
             
         models = self.model_service.list_models()
-        active_model = self.config.get("model")
+        active_model = self.config_mgr.get("model")
         
         for i, m in enumerate(models):
             frame = ctk.CTkFrame(self.scrollable_frame)
@@ -123,21 +124,29 @@ class ModelManagerWindow(ctk.CTkToplevel):
         threading.Thread(target=run_dl, daemon=True).start()
 
     def _delete_model(self, model_name):
+        """Queues a background delete so rmtree (up to ~3GB) never blocks the
+        UI thread. Results drain through _poll_async on the UI thread."""
+        if model_name in self._deleting:
+            return
+        self._deleting.add(model_name)
         row = self.rows.get(model_name)
-        try:
-            self.model_service.delete(model_name)
-            self._render_models()
-            if self.on_change_callback:
-                self.on_change_callback()
-        except SySubsError as e:
-            # A failed delete leaves the model on disk — surface it in the UI
-            # (inline + dialog) instead of failing silently.
-            logger.error(f"Delete failed: {e}")
-            if row:
-                lbl = row["status_label"]
-                lbl.configure(text=f"Delete failed: {str(e)[:40]}", text_color="red")
-                self.after(5000, lambda: self._restore_downloaded_status(lbl))
-            messagebox.showerror("Delete Failed", str(e))
+        if row:
+            row["del_btn"].configure(state="disabled")
+            row["status_label"].configure(text="Deleting...", text_color="orange")
+
+        q = queue.Queue()
+        self.delete_queues[model_name] = q
+
+        def run_delete():
+            try:
+                self.model_service.delete(model_name)
+                q.put({"type": "success"})
+            except Exception as e:
+                # model_service.delete raises SySubsError; the catch-all keeps
+                # a worker crash from vanishing silently.
+                q.put({"type": "error", "message": str(e)})
+
+        threading.Thread(target=run_delete, name="sysubs-model-delete", daemon=True).start()
 
     def _restore_downloaded_status(self, label):
         """Restores the 'Downloaded' badge after an inline error (guarded
@@ -147,7 +156,34 @@ class ModelManagerWindow(ctk.CTkToplevel):
         except Exception:
             pass
 
-    def _poll_downloads(self):
+    def _poll_async(self):
+        # --- model deletes (worker thread → queue → drained here) ---
+        for name, q in list(self.delete_queues.items()):
+            try:
+                msg = q.get_nowait()
+            except queue.Empty:
+                continue
+            self._deleting.discard(name)
+            del self.delete_queues[name]
+            if msg["type"] == "success":
+                logger.info(f"Deleted model {name}")
+                self._render_models()
+                if self.on_change_callback:
+                    self.on_change_callback()
+            else:
+                # A failed delete leaves the model on disk — surface it in
+                # the UI (inline + dialog) instead of failing silently.
+                logger.error(f"Delete failed for {name}: {msg['message']}")
+                row = self.rows.get(name)
+                if row:
+                    row["del_btn"].configure(state="normal")
+                    row["status_label"].configure(
+                        text=f"Delete failed: {msg['message'][:40]}", text_color="red"
+                    )
+                    self.after(5000, lambda lbl=row["status_label"]: self._restore_downloaded_status(lbl))
+                messagebox.showerror("Delete Failed", msg["message"])
+
+        # --- downloads ---
         active_names = set()
         now = time.monotonic()
 
@@ -186,4 +222,4 @@ class ModelManagerWindow(ctk.CTkToplevel):
                         )
                     self._download_started[name] = now  # re-arm so we don't spam every tick
 
-        self.after(DOWNLOAD_POLL_MS, self._poll_downloads)
+        self.after(DOWNLOAD_POLL_MS, self._poll_async)

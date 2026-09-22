@@ -127,3 +127,67 @@ def test_extract_raises_on_ffmpeg_failure(monkeypatch, tmp_path):
 def test_extract_missing_input_raises():
     with pytest.raises(FileNotFoundError):
         ae.extract("does_not_exist.mp4")
+
+
+# ------------------------------------------------------ subprocess timeouts
+
+def test_probe_passes_timeout_to_ffmpeg(monkeypatch, media_file):
+    captured = {}
+
+    def fake_run(cmd, **kwargs):
+        captured.update(kwargs)
+        return FakeResult(stderr="Duration: 00:00:05, bitrate: 1")
+
+    monkeypatch.setattr(ae.subprocess, "run", fake_run)
+    ae.probe_duration(media_file)
+    assert captured.get("timeout"), "probe_duration must pass timeout= to ffmpeg"
+
+
+def test_probe_passes_timeout_to_ffprobe_fallback(monkeypatch, media_file):
+    captured = {}
+
+    def fake_run(cmd, **kwargs):
+        if "-i" in cmd:
+            return FakeResult(stderr="no duration")
+        captured.update(kwargs)
+        return FakeResult(stdout="123.4\n")
+
+    monkeypatch.setattr(ae.subprocess, "run", fake_run)
+    assert ae.probe_duration(media_file) == 123.4
+    assert captured.get("timeout"), "ffprobe fallback must pass timeout="
+
+
+def test_probe_timeout_degrades_to_none(monkeypatch, media_file):
+    def boom(cmd, **kwargs):
+        raise subprocess.TimeoutExpired(cmd, kwargs.get("timeout") or 1)
+
+    monkeypatch.setattr(ae.subprocess, "run", boom)
+    assert ae.probe_duration(media_file) is None  # best-effort, never raises
+
+
+def test_extract_passes_timeout(monkeypatch, tmp_path):
+    monkeypatch.setenv("TEMP", str(tmp_path))
+    source = tmp_path / "input.mp4"
+    source.write_bytes(b"")
+    captured = {}
+
+    def fake_run(cmd, **kwargs):
+        captured.update(kwargs)
+        return FakeResult()
+
+    monkeypatch.setattr(ae.subprocess, "run", fake_run)
+    ae.extract(str(source))
+    assert captured.get("timeout") == ae.EXTRACT_TIMEOUT_S
+
+
+def test_extract_timeout_raises_actionable_error(monkeypatch, tmp_path):
+    monkeypatch.setenv("TEMP", str(tmp_path))
+    source = tmp_path / "input.mp4"
+    source.write_bytes(b"")
+
+    def boom(cmd, **kwargs):
+        raise subprocess.TimeoutExpired(cmd, kwargs.get("timeout") or 1)
+
+    monkeypatch.setattr(ae.subprocess, "run", boom)
+    with pytest.raises(AudioExtractionError, match="ffmpeg extraction timed out"):
+        ae.extract(str(source))
